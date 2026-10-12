@@ -1,0 +1,13 @@
+# Collected data lives on the `data` branch, never on this one
+data/
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+dist/
+
+# Local settings and secrets
+.env

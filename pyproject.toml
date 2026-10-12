@@ -1,0 +1,37 @@
+[project]
+name = "steam-pulse"
+version = "0.1.0"
+description = "What is being played on Steam, hour by hour: collection, modelling and dashboard"
+readme = "README.md"
+authors = [{ name = "Adrià Tadeo Tormos" }]
+requires-python = ">=3.12"
+# The collector runs every hour on a bare runner, so it uses the standard library only:
+# nothing to install means nothing that can fail to install.
+dependencies = []
+
+[project.scripts]
+collect = "steam_pulse.collect:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/steam_pulse"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.17.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
