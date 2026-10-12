@@ -1,6 +1,10 @@
 # Collected data lives on the `data` branch, never on this one
 data/
 
+# Local warehouse: rebuilt from the `data` branch with `uv run load`
+*.duckdb
+*.duckdb.wal
+
 # Python
 .venv/
 __pycache__/
