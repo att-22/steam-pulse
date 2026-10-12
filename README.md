@@ -18,7 +18,8 @@ tables and a dashboard.
 | Stage | State |
 |---|---|
 | Hourly collection of raw snapshots | Running |
-| Modelling with dbt on a cloud warehouse | Planned |
+| Load of the raw snapshots into the warehouse | Working locally (DuckDB); cloud warehouse planned |
+| Modelling with dbt | Planned |
 | Dashboard | Planned |
 | Data quality and freshness alerts | Planned |
 
@@ -60,6 +61,22 @@ Each file is the response wrapped in an envelope:
 }
 ```
 
+## How the load works
+
+```
+`data` branch (JSON files)  ->  steam_pulse.load  ->  raw.snapshots (one row per file)
+```
+
+- **The warehouse is disposable.** It holds nothing that is not in the snapshot files:
+  delete it, run the load, and it is back.
+- **The load only copies.** Each file becomes one row with its payload kept as JSON,
+  rejected responses included. Turning that into players per game is left to the models.
+- **Loading twice adds nothing.** A snapshot is identified by its source and its file
+  name, so only the files that are not in the warehouse yet are read. A load that fails
+  halfway leaves the warehouse as it was.
+- **One code path, two warehouses.** `--database` takes a local DuckDB file or a
+  MotherDuck database (`md:steam_pulse`).
+
 ## Run it locally
 
 You only need [uv](https://docs.astral.sh/uv/).
@@ -71,5 +88,14 @@ uv run collect --output data    # one snapshot, written to data/raw/
 uv run pytest                   # the tests never call Steam
 ```
 
+To query the history collected so far, check out the `data` branch next to the code and
+load it into a local DuckDB file:
+
+```bash
+git worktree add data origin/data     # the snapshots, in data/raw/
+uv run load                           # creates steam_pulse.duckdb
+```
+
 The collector uses the Python standard library only, so the hourly job installs
-nothing: fewer steps, fewer things that can fail 8,760 times a year.
+nothing: fewer steps, fewer things that can fail 8,760 times a year. Only the load needs
+a dependency (DuckDB), and the collector never imports it.

@@ -11,6 +11,7 @@ dependencies = []
 
 [project.scripts]
 collect = "steam_pulse.collect:main"
+load = "steam_pulse.load:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -24,6 +25,13 @@ dev = [
     "pytest>=9.1.1",
     "ruff>=0.17.0",
 ]
+# Only the load into the warehouse needs these; the collector never imports them.
+warehouse = [
+    "duckdb>=1.5.6",
+]
+
+[tool.uv]
+default-groups = ["dev", "warehouse"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
