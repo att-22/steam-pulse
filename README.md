@@ -26,9 +26,13 @@ tables and a dashboard.
 ## How the collection works
 
 ```
-GitHub Actions (every hour)  ->  steam_pulse.collect  ->  commit on the `data` branch
+GitHub Actions (twice an hour)  ->  steam_pulse.collect  ->  commit on the `data` branch
 ```
 
+- **Two runs an hour for one snapshot an hour.** GitHub does not guarantee scheduled
+  runs: it delays them under load and may drop them. A hole in the history cannot be
+  filled later, so the collection runs twice an hour and the models keep one snapshot
+  per hour.
 - **One request per snapshot.** A single Steam endpoint returns the 100 most played
   games with their player counts. A second request stores the total number of Steam
   users online and in game.

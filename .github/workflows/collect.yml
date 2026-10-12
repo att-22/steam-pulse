@@ -1,4 +1,4 @@
-# Collects one snapshot of Steam every hour and commits it to the `data` branch.
+# Collects snapshots of Steam and commits them to the `data` branch.
 #
 # Scheduled workflows only run from the default branch, and `main` only changes through
 # pull requests, so the code is read from `main` and the data is written to a separate
@@ -7,9 +7,12 @@ name: Collect
 
 on:
   schedule:
-    # Minute 17, not 0: GitHub delays scheduled runs when many start at once, and the
-    # top of the hour is when most of them do.
+    # Twice an hour, away from minute 0: GitHub delays scheduled runs when many start at
+    # once, which is mostly at the top of the hour, and under load it may drop them
+    # altogether. The second run is a spare: one snapshot per hour is enough, and
+    # collecting a snapshot that is already stored changes nothing.
     - cron: "17 * * * *"
+    - cron: "47 * * * *"
   workflow_dispatch:
 
 permissions:
