@@ -19,7 +19,7 @@ tables and a dashboard.
 |---|---|
 | Hourly collection of raw snapshots | Running |
 | Load of the raw snapshots into the warehouse | Working locally (DuckDB); cloud warehouse planned |
-| Modelling with dbt | Staging layer built; series and aggregates planned |
+| Modelling with dbt | Hourly and daily tables built; game names planned |
 | Dashboard | Planned |
 | Data quality and freshness alerts | Planned |
 
@@ -80,8 +80,14 @@ Each file is the response wrapped in an envelope:
 ## How the modelling works
 
 ```
-raw.snapshots  ->  dbt (transform/)  ->  staging.stg_concurrent_players   one row per game and snapshot
-                                     ->  staging.stg_steam_users          one row per snapshot
+raw.snapshots
+  -> staging        stg_concurrent_players   one row per game and snapshot
+                    stg_steam_users          one row per snapshot
+  -> intermediate   int_hourly_snapshots     the snapshot that stands for each hour
+  -> marts          fct_game_hourly          one row per game and hour
+                    fct_game_daily           one row per game and day
+                    fct_platform_hourly      one row per hour, with the totals of Steam
+                    fct_ranking_changes      games entering and leaving the ranking
 ```
 
 - **Staging only renames and types.** The ranking is unfolded into one row per game,
@@ -90,7 +96,13 @@ raw.snapshots  ->  dbt (transform/)  ->  staging.stg_concurrent_players   one ro
   it computed the ranking; `collected_at` is kept next to it, so the age of the cached
   response can be measured.
 - **Missing is not zero.** A game has rows only while it is in the ranking. Nothing
-  fills the gaps with zeros.
+  fills the gaps with zeros, and a change is only computed against exactly one hour
+  before: if that hour is not known, the change is null.
+- **One snapshot per hour, chosen once.** Runs can be late, repeated or launched by
+  hand. `int_hourly_snapshots` picks the last snapshot of each hour and every table
+  builds on that choice.
+- **Hours and days are cut in UTC**, explicitly, so the same snapshot falls on the same
+  day whatever the time zone of the machine that runs the models.
 - **Tested three ways.** Unit tests feed the models hand-written snapshots, data tests
   check every row actually loaded (unique keys, consecutive positions, a ranking that
   follows the player count, totals that can be true), and CI builds everything on a few

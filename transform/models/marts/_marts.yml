@@ -1,0 +1,236 @@
+version: 2
+
+models:
+  - name: fct_game_hourly
+    description: >
+      One row per game and hour in which the game was in the ranking. A game that drops
+      out has no row for that hour: not reported, which is not the same as zero players.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [hour_at, appid]
+    columns:
+      - name: hour_at
+        description: The start of the hour, in UTC.
+        data_tests: [not_null]
+      - name: appid
+        description: The identifier Steam gives the game.
+        data_tests: [not_null]
+      - name: snapshot_id
+        description: The snapshot the figures come from.
+        data_tests: [not_null]
+      - name: snapshot_at
+        description: The exact moment of the figures, within the hour.
+        data_tests: [not_null]
+      - name: rank
+        description: Position in the ranking, 1 being the most played.
+        data_tests: [not_null]
+      - name: concurrent_players
+        description: People playing the game at snapshot_at.
+        data_tests: [not_null]
+      - name: players_change_1h
+        description: Players now minus players exactly one hour before. Null when that hour is not known for the game.
+      - name: positions_gained_1h
+        description: Positions climbed since exactly one hour before; negative when it fell. Null when that hour is not known for the game.
+
+  - name: fct_platform_hourly
+    description: One row per hour with data, the ranking as a whole next to the totals of all of Steam.
+    columns:
+      - name: hour_at
+        description: The start of the hour, in UTC.
+        data_tests: [unique, not_null]
+      - name: snapshot_id
+        description: The ranking snapshot the figures come from.
+        data_tests: [not_null]
+      - name: snapshot_at
+        description: The exact moment of the ranking, within the hour.
+        data_tests: [not_null]
+      - name: games_in_ranking
+        description: How many games the ranking had.
+        data_tests: [not_null]
+      - name: ranked_players
+        description: Players of all the games in the ranking together.
+        data_tests: [not_null]
+      - name: top_appid
+        description: The most played game.
+        data_tests: [not_null]
+      - name: top_game_players
+        description: Players of the most played game.
+        data_tests: [not_null]
+      - name: users_online
+        description: People connected to Steam. Null when the totals were not collected with this ranking.
+      - name: users_in_game
+        description: People playing anything on Steam. Null when the totals were not collected with this ranking.
+      - name: ranked_share_of_in_game
+        description: ranked_players over users_in_game, between 0 and 1. Approximate, the two are minutes apart.
+
+  - name: fct_game_daily
+    description: One row per game and UTC day in which the game was in the ranking at least once.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [day, appid]
+    columns:
+      - name: day
+        description: The day, in UTC.
+        data_tests: [not_null]
+      - name: appid
+        description: The identifier Steam gives the game.
+        data_tests: [not_null]
+      - name: hours_in_ranking
+        description: Hours of the day in which the game was in the ranking.
+        data_tests: [not_null]
+      - name: hours_collected
+        description: Hours of the day that have data at all. 24 on a complete day.
+        data_tests: [not_null]
+      - name: peak_players
+        description: The most players seen in the day.
+        data_tests: [not_null]
+      - name: peak_hour_at
+        description: The hour of that peak.
+        data_tests: [not_null]
+      - name: avg_players_while_ranked
+        description: Average players over the hours the game was in the ranking. Its other hours are not in the data.
+        data_tests: [not_null]
+      - name: best_rank
+        description: The highest position reached in the day.
+        data_tests: [not_null]
+
+  - name: fct_ranking_changes
+    description: >
+      One row per game that entered or left the ranking between an hour with data and the
+      previous hour with data.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [hour_at, appid]
+    columns:
+      - name: hour_at
+        description: The hour in which the change was seen.
+        data_tests: [not_null]
+      - name: previous_hour_at
+        description: The hour it is compared with, the previous one that was collected.
+        data_tests: [not_null]
+      - name: hours_since_previous
+        description: Hours between the two. More than 1 means hours were not collected in between.
+        data_tests: [not_null]
+      - name: appid
+        description: The identifier Steam gives the game.
+        data_tests: [not_null]
+      - name: change
+        description: Whether the game entered the ranking or left it.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [entered, left]
+      - name: rank_when_seen
+        description: Where the game is now if it entered; where it last was if it left.
+        data_tests: [not_null]
+      - name: players_when_seen
+        description: Its players now if it entered; its last known players if it left.
+        data_tests: [not_null]
+
+unit_tests:
+  - name: changes_compare_with_exactly_one_hour_before
+    model: fct_game_hourly
+    given:
+      - input: ref('int_hourly_snapshots')
+        rows:
+          - {hour_at: "2026-10-12 14:00:00+00", snapshot_id: A}
+          - {hour_at: "2026-10-12 15:00:00+00", snapshot_id: B}
+          - {hour_at: "2026-10-12 17:00:00+00", snapshot_id: C}
+      - input: ref('stg_concurrent_players')
+        rows:
+          - {snapshot_id: A, snapshot_at: "2026-10-12 14:55:00+00", appid: 730, rank: 2, concurrent_players: 1000}
+          - {snapshot_id: A, snapshot_at: "2026-10-12 14:55:00+00", appid: 570, rank: 1, concurrent_players: 1500}
+          - {snapshot_id: B, snapshot_at: "2026-10-12 15:50:00+00", appid: 730, rank: 1, concurrent_players: 1300}
+          - {snapshot_id: B, snapshot_at: "2026-10-12 15:50:00+00", appid: 440, rank: 2, concurrent_players: 900}
+          - {snapshot_id: C, snapshot_at: "2026-10-12 17:10:00+00", appid: 730, rank: 1, concurrent_players: 1100}
+          # A snapshot that stands for no hour is left out
+          - {snapshot_id: Z, snapshot_at: "2026-10-12 15:10:00+00", appid: 730, rank: 1, concurrent_players: 1}
+    expect:
+      rows:
+        # First hour: nothing to compare with
+        - {hour_at: "2026-10-12 14:00:00+00", appid: 730, snapshot_id: A, snapshot_at: "2026-10-12 14:55:00+00", rank: 2, concurrent_players: 1000, players_change_1h: null, positions_gained_1h: null}
+        - {hour_at: "2026-10-12 14:00:00+00", appid: 570, snapshot_id: A, snapshot_at: "2026-10-12 14:55:00+00", rank: 1, concurrent_players: 1500, players_change_1h: null, positions_gained_1h: null}
+        - {hour_at: "2026-10-12 15:00:00+00", appid: 730, snapshot_id: B, snapshot_at: "2026-10-12 15:50:00+00", rank: 1, concurrent_players: 1300, players_change_1h: 300, positions_gained_1h: 1}
+        # Was not in the ranking an hour before: unknown, not +900
+        - {hour_at: "2026-10-12 15:00:00+00", appid: 440, snapshot_id: B, snapshot_at: "2026-10-12 15:50:00+00", rank: 2, concurrent_players: 900, players_change_1h: null, positions_gained_1h: null}
+        # 16:00 was not collected: unknown, not compared with 15:00
+        - {hour_at: "2026-10-12 17:00:00+00", appid: 730, snapshot_id: C, snapshot_at: "2026-10-12 17:10:00+00", rank: 1, concurrent_players: 1100, players_change_1h: null, positions_gained_1h: null}
+
+  - name: ranking_is_summed_and_paired_with_the_totals_collected_with_it
+    model: fct_platform_hourly
+    given:
+      - input: ref('int_hourly_snapshots')
+        rows:
+          - {hour_at: "2026-10-12 14:00:00+00", snapshot_id: A, snapshot_at: "2026-10-12 14:58:00+00", collected_at: "2026-10-12 15:01:00+00"}
+          - {hour_at: "2026-10-12 15:00:00+00", snapshot_id: B, snapshot_at: "2026-10-12 15:50:00+00", collected_at: "2026-10-12 15:55:00+00"}
+      - input: ref('stg_concurrent_players')
+        rows:
+          - {snapshot_id: A, appid: 730, rank: 1, concurrent_players: 600}
+          - {snapshot_id: A, appid: 570, rank: 2, concurrent_players: 400}
+          - {snapshot_id: B, appid: 570, rank: 1, concurrent_players: 500}
+          - {snapshot_id: Z, appid: 570, rank: 1, concurrent_players: 77}
+      - input: ref('stg_steam_users')
+        rows:
+          # Asked for 4 minutes before the ranking of A, and 3 minutes after it: the nearest wins,
+          # even though it falls in the next hour
+          - {snapshot_id: U1, snapshot_at: "2026-10-12 14:57:00+00", users_online: 9999, users_in_game: 9999}
+          - {snapshot_id: U2, snapshot_at: "2026-10-12 15:04:00+00", users_online: 5000, users_in_game: 2000}
+          # 6 minutes away from the ranking of B: too far to be the same run
+          - {snapshot_id: U3, snapshot_at: "2026-10-12 16:01:00+00", users_online: 7000, users_in_game: 3000}
+    expect:
+      rows:
+        - {hour_at: "2026-10-12 14:00:00+00", snapshot_id: A, snapshot_at: "2026-10-12 14:58:00+00", games_in_ranking: 2, ranked_players: 1000, top_appid: 730, top_game_players: 600, users_online: 5000, users_in_game: 2000, ranked_share_of_in_game: 0.5}
+        - {hour_at: "2026-10-12 15:00:00+00", snapshot_id: B, snapshot_at: "2026-10-12 15:50:00+00", games_in_ranking: 1, ranked_players: 500, top_appid: 570, top_game_players: 500, users_online: null, users_in_game: null, ranked_share_of_in_game: null}
+
+  - name: days_are_cut_in_utc_and_summarised_per_game
+    model: fct_game_daily
+    given:
+      - input: ref('int_hourly_snapshots')
+        rows:
+          - {hour_at: "2026-10-12 21:00:00+00"}
+          - {hour_at: "2026-10-12 22:00:00+00"}
+          - {hour_at: "2026-10-12 23:00:00+00"}
+          - {hour_at: "2026-10-13 00:00:00+00"}
+      - input: ref('fct_game_hourly')
+        rows:
+          - {hour_at: "2026-10-12 21:00:00+00", appid: 730, rank: 3, concurrent_players: 100}
+          - {hour_at: "2026-10-12 22:00:00+00", appid: 730, rank: 1, concurrent_players: 400}
+          # 23:00 UTC is already the 13th in Madrid: it must stay on the 12th
+          - {hour_at: "2026-10-12 23:00:00+00", appid: 730, rank: 2, concurrent_players: 250}
+          - {hour_at: "2026-10-13 00:00:00+00", appid: 730, rank: 5, concurrent_players: 90}
+          - {hour_at: "2026-10-12 22:00:00+00", appid: 570, rank: 2, concurrent_players: 300}
+    expect:
+      rows:
+        - {day: "2026-10-12", appid: 730, hours_in_ranking: 3, hours_collected: 3, peak_players: 400, peak_hour_at: "2026-10-12 22:00:00+00", avg_players_while_ranked: 250, best_rank: 1}
+        - {day: "2026-10-12", appid: 570, hours_in_ranking: 1, hours_collected: 3, peak_players: 300, peak_hour_at: "2026-10-12 22:00:00+00", avg_players_while_ranked: 300, best_rank: 2}
+        - {day: "2026-10-13", appid: 730, hours_in_ranking: 1, hours_collected: 1, peak_players: 90, peak_hour_at: "2026-10-13 00:00:00+00", avg_players_while_ranked: 90, best_rank: 5}
+
+  - name: entries_and_exits_between_consecutive_hours_of_data
+    model: fct_ranking_changes
+    given:
+      - input: ref('int_hourly_snapshots')
+        rows:
+          - {hour_at: "2026-10-12 14:00:00+00"}
+          - {hour_at: "2026-10-12 15:00:00+00"}
+          - {hour_at: "2026-10-12 18:00:00+00"}
+      - input: ref('fct_game_hourly')
+        rows:
+          # 14:00 is the first hour: its games did not "enter"
+          - {hour_at: "2026-10-12 14:00:00+00", appid: 730, rank: 1, concurrent_players: 900}
+          - {hour_at: "2026-10-12 14:00:00+00", appid: 570, rank: 2, concurrent_players: 800}
+          # 15:00: 570 left, 440 entered, 730 stayed
+          - {hour_at: "2026-10-12 15:00:00+00", appid: 730, rank: 1, concurrent_players: 950}
+          - {hour_at: "2026-10-12 15:00:00+00", appid: 440, rank: 2, concurrent_players: 700}
+          # 18:00, three hours later: 570 is back, 440 left
+          - {hour_at: "2026-10-12 18:00:00+00", appid: 730, rank: 2, concurrent_players: 600}
+          - {hour_at: "2026-10-12 18:00:00+00", appid: 570, rank: 1, concurrent_players: 850}
+    expect:
+      rows:
+        - {hour_at: "2026-10-12 15:00:00+00", previous_hour_at: "2026-10-12 14:00:00+00", hours_since_previous: 1, appid: 440, change: entered, rank_when_seen: 2, players_when_seen: 700}
+        - {hour_at: "2026-10-12 15:00:00+00", previous_hour_at: "2026-10-12 14:00:00+00", hours_since_previous: 1, appid: 570, change: left, rank_when_seen: 2, players_when_seen: 800}
+        - {hour_at: "2026-10-12 18:00:00+00", previous_hour_at: "2026-10-12 15:00:00+00", hours_since_previous: 3, appid: 570, change: entered, rank_when_seen: 1, players_when_seen: 850}
+        - {hour_at: "2026-10-12 18:00:00+00", previous_hour_at: "2026-10-12 15:00:00+00", hours_since_previous: 3, appid: 440, change: left, rank_when_seen: 2, players_when_seen: 700}
