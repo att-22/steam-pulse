@@ -25,13 +25,17 @@ dev = [
     "pytest>=9.1.1",
     "ruff>=0.17.0",
 ]
+# The dbt models that turn the raw snapshots into tables.
+transform = [
+    "dbt-duckdb>=1.11.0",
+]
 # Only the load into the warehouse needs these; the collector never imports them.
 warehouse = [
     "duckdb>=1.5.6",
 ]
 
 [tool.uv]
-default-groups = ["dev", "warehouse"]
+default-groups = ["dev", "warehouse", "transform"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

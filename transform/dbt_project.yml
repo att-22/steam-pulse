@@ -1,0 +1,17 @@
+name: steam_pulse
+version: "0.1.0"
+profile: steam_pulse
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+target-path: target
+clean-targets: ["target", "dbt_packages"]
+
+models:
+  steam_pulse:
+    # One row per thing Steam reported, with proper names and types, and nothing else.
+    # Views: they are thin and always reflect what was last loaded.
+    staging:
+      +schema: staging
+      +materialized: view
