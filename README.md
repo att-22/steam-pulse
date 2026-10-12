@@ -19,7 +19,7 @@ tables and a dashboard.
 |---|---|
 | Hourly collection of raw snapshots | Running |
 | Load of the raw snapshots into the warehouse | Working locally (DuckDB); cloud warehouse planned |
-| Modelling with dbt | Planned |
+| Modelling with dbt | Staging layer built; series and aggregates planned |
 | Dashboard | Planned |
 | Data quality and freshness alerts | Planned |
 
@@ -77,6 +77,25 @@ Each file is the response wrapped in an envelope:
 - **One code path, two warehouses.** `--database` takes a local DuckDB file or a
   MotherDuck database (`md:steam_pulse`).
 
+## How the modelling works
+
+```
+raw.snapshots  ->  dbt (transform/)  ->  staging.stg_concurrent_players   one row per game and snapshot
+                                     ->  staging.stg_steam_users          one row per snapshot
+```
+
+- **Staging only renames and types.** The ranking is unfolded into one row per game,
+  `"38,882,059"` becomes a number, rejected responses are left out. No business logic yet.
+- **The time of a row is the time of the data.** `snapshot_at` is the moment Steam says
+  it computed the ranking; `collected_at` is kept next to it, so the age of the cached
+  response can be measured.
+- **Missing is not zero.** A game has rows only while it is in the ranking. Nothing
+  fills the gaps with zeros.
+- **Tested three ways.** Unit tests feed the models hand-written snapshots, data tests
+  check every row actually loaded (unique keys, consecutive positions, a ranking that
+  follows the player count, totals that can be true), and CI builds everything on a few
+  real snapshots kept in `tests/sample/`.
+
 ## Run it locally
 
 You only need [uv](https://docs.astral.sh/uv/).
@@ -94,6 +113,7 @@ load it into a local DuckDB file:
 ```bash
 git worktree add data origin/data     # the snapshots, in data/raw/
 uv run load                           # creates steam_pulse.duckdb
+cd transform && uv run dbt build      # builds the models and runs their tests
 ```
 
 The collector uses the Python standard library only, so the hourly job installs

@@ -1,0 +1,34 @@
+version: 2
+
+sources:
+  - name: raw
+    description: What the collector stored, copied by `steam_pulse.load` without interpreting it.
+    schema: raw
+    # A snapshot is expected every hour. GitHub may delay or drop a scheduled run, so one
+    # missing hour is not news; several in a row mean the collection has stopped.
+    loaded_at_field: collected_at
+    freshness:
+      warn_after: {count: 3, period: hour}
+      error_after: {count: 6, period: hour}
+    tables:
+      - name: snapshots
+        description: One row per snapshot file, accepted or rejected.
+        columns:
+          - name: source
+            description: Which endpoint the snapshot comes from.
+            data_tests:
+              - not_null
+              - accepted_values:
+                  arguments:
+                    values: [concurrent_players, steam_users]
+          - name: snapshot_id
+            description: The file name. The moment the data is from, in UTC.
+            data_tests: [not_null]
+          - name: rejected
+            description: True when the collector did not accept the response.
+            data_tests: [not_null]
+          - name: collected_at
+            description: When the collector asked.
+            data_tests: [not_null]
+          - name: payload
+            description: The response as received, when it was JSON.

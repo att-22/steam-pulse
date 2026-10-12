@@ -1,0 +1,139 @@
+version: 2
+
+models:
+  - name: stg_concurrent_players
+    description: >
+      One row per game and snapshot, from the ranking of the most played games. A game
+      has rows only for the snapshots in which it was in the ranking.
+    columns:
+      - name: snapshot_game_id
+        description: Snapshot and game together. Identifies the row.
+        data_tests: [unique, not_null]
+      - name: snapshot_id
+        description: The snapshot the row comes from, as in raw.snapshots.
+        data_tests: [not_null]
+      - name: snapshot_at
+        description: When Steam computed the ranking (its `last_update`).
+        data_tests: [not_null]
+      - name: collected_at
+        description: When the collector asked. Later than snapshot_at by the age of the cached response.
+        data_tests: [not_null]
+      - name: appid
+        description: The identifier Steam gives the game.
+        data_tests: [not_null]
+      - name: rank
+        description: Position in the ranking, 1 being the most played.
+        data_tests: [not_null]
+      - name: concurrent_players
+        description: People playing the game at snapshot_at.
+        data_tests: [not_null]
+      - name: peak_players
+        description: Peak reported by Steam next to the current count. The period it covers is not documented.
+        data_tests: [not_null]
+
+  - name: stg_steam_users
+    description: One row per snapshot of the totals for the whole of Steam.
+    columns:
+      - name: snapshot_id
+        description: The snapshot the row comes from, as in raw.snapshots.
+        data_tests: [unique, not_null]
+      - name: snapshot_at
+        description: When the collector asked; the source has no timestamp of its own.
+        data_tests: [not_null]
+      - name: users_online
+        description: People connected to Steam.
+        data_tests: [not_null]
+      - name: users_in_game
+        description: People connected to Steam and playing something.
+        data_tests: [not_null]
+
+unit_tests:
+  - name: ranking_is_unfolded_into_one_row_per_game
+    model: stg_concurrent_players
+    given:
+      - input: source('raw', 'snapshots')
+        format: sql
+        rows: |
+          select
+              'concurrent_players' as source,
+              '20261012T141500Z' as snapshot_id,
+              false as rejected,
+              timestamptz '2026-10-12 14:17:03+00' as collected_at,
+              '{"response": {"last_update": 1791814500, "ranks": [
+                  {"rank": 1, "appid": 730, "concurrent_in_game": 1208155, "peak_in_game": 1400000},
+                  {"rank": 2, "appid": 570, "concurrent_in_game": 610000, "peak_in_game": 700000}
+              ]}}'::json as payload
+    expect:
+      rows:
+        - snapshot_game_id: 20261012T141500Z-730
+          snapshot_at: 2026-10-12 14:15:00+00
+          collected_at: 2026-10-12 14:17:03+00
+          appid: 730
+          rank: 1
+          concurrent_players: 1208155
+          peak_players: 1400000
+        - snapshot_game_id: 20261012T141500Z-570
+          snapshot_at: 2026-10-12 14:15:00+00
+          collected_at: 2026-10-12 14:17:03+00
+          appid: 570
+          rank: 2
+          concurrent_players: 610000
+          peak_players: 700000
+
+  - name: rejected_and_other_sources_are_left_out_of_the_ranking
+    model: stg_concurrent_players
+    given:
+      - input: source('raw', 'snapshots')
+        format: sql
+        rows: |
+          select
+              'concurrent_players' as source, '20261012T150000Z' as snapshot_id, true as rejected,
+              timestamptz '2026-10-12 15:00:00+00' as collected_at,
+              '{"response": {"last_update": 1791814500, "ranks": [
+                  {"rank": 1, "appid": 730, "concurrent_in_game": 5, "peak_in_game": 9}
+              ]}}'::json as payload
+          union all
+          select
+              'steam_users', '20261012T150001Z', false,
+              timestamptz '2026-10-12 15:00:01+00',
+              '{"response": {"last_update": 1791814500, "ranks": [
+                  {"rank": 1, "appid": 730, "concurrent_in_game": 5, "peak_in_game": 9}
+              ]}}'::json
+    expect:
+      rows: []
+
+  - name: user_totals_become_numbers
+    model: stg_steam_users
+    given:
+      - input: source('raw', 'snapshots')
+        format: sql
+        rows: |
+          select
+              'steam_users' as source, '20261012T141703Z' as snapshot_id, false as rejected,
+              timestamptz '2026-10-12 14:17:03+00' as collected_at,
+              '{"users_online": "38,882,059", "users_ingame": "11,853,306"}'::json as payload
+          union all
+          select
+              'steam_users', '20261012T151703Z', false,
+              timestamptz '2026-10-12 15:17:03+00',
+              '{"users_online": "950", "users_ingame": "n/a"}'::json
+          union all
+          select
+              'steam_users', '20261012T161703Z', true,
+              timestamptz '2026-10-12 16:17:03+00',
+              null::json
+          union all
+          select
+              'concurrent_players', '20261012T161500Z', false,
+              timestamptz '2026-10-12 16:17:03+00',
+              '{"users_online": "7", "users_ingame": "7"}'::json
+    expect:
+      rows:
+        - snapshot_id: 20261012T141703Z
+          snapshot_at: 2026-10-12 14:17:03+00
+          users_online: 38882059
+          users_in_game: 11853306
+        - snapshot_id: 20261012T151703Z
+          snapshot_at: 2026-10-12 15:17:03+00
+          users_online: 950
+          users_in_game: null

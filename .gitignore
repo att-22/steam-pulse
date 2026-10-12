@@ -15,3 +15,9 @@ dist/
 
 # Local settings and secrets
 .env
+
+# dbt
+transform/target/
+transform/logs/
+transform/dbt_packages/
+transform/.user.yml

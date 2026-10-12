@@ -1,0 +1,17 @@
+# No secrets here: the MotherDuck token is read from the MOTHERDUCK_TOKEN environment
+# variable by DuckDB itself.
+steam_pulse:
+  target: local
+  outputs:
+    # A DuckDB file next to the code, filled by `uv run load`.
+    local:
+      type: duckdb
+      path: "{{ env_var('STEAM_PULSE_DATABASE', '../steam_pulse.duckdb') }}"
+      schema: main
+      threads: 1
+    # The same models on the cloud warehouse: `dbt build --target motherduck`.
+    motherduck:
+      type: duckdb
+      path: "md:steam_pulse"
+      schema: main
+      threads: 1

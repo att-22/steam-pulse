@@ -31,6 +31,23 @@ jobs:
       - run: uv sync --locked
       - run: uv run pytest
 
+  # Loads a few real snapshots kept in the repository and builds every model on them,
+  # with all their tests. No warehouse to connect to: it is a DuckDB file on the runner.
+  models:
+    name: Models (dbt)
+    runs-on: ubuntu-latest
+    env:
+      STEAM_PULSE_DATABASE: ${{ github.workspace }}/ci.duckdb
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - run: uv run load --input tests/sample --database ci.duckdb
+      - run: uv run dbt build
+        working-directory: transform
+
   # The hourly job runs with the runner's own Python and no installation step.
   # This checks that it still works that way, without calling Steam.
   collector:
