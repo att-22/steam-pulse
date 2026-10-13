@@ -44,6 +44,15 @@ jobs:
         env:
           PYTHONPATH: src
 
+      # The details of the games that have none yet: all of them the first time, then
+      # only the ones that enter the ranking. Names can wait and snapshots cannot, so a
+      # failure here is shown on the step but does not fail the run.
+      - name: Collect game details
+        continue-on-error: true
+        run: python3 -m steam_pulse.details --output data
+        env:
+          PYTHONPATH: src
+
       # Runs even if the collection failed: a rejected response is worth keeping too.
       - name: Commit the snapshot
         if: always()

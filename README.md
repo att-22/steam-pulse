@@ -18,6 +18,7 @@ tables and a dashboard.
 | Stage | State |
 |---|---|
 | Hourly collection of raw snapshots | Running |
+| Collection of the details of each game (name, genres, release date) | Running; not modelled yet |
 | Load of the raw snapshots into the warehouse | Working locally (DuckDB); cloud warehouse planned |
 | Modelling with dbt | Hourly and daily tables built; game names planned |
 | Dashboard | Planned |
@@ -40,6 +41,13 @@ GitHub Actions (twice an hour)  ->  steam_pulse.collect  ->  commit on the `data
   it was computed (`last_update`). Responses come through a cache and can be older than
   a previous one, so each snapshot is filed under that moment: collecting the same
   snapshot twice stores it once.
+- **The details of a game are asked for once.** The ranking only carries numbers, so
+  the name, type, genres and release date of each game come from the store, one request
+  per game. After each snapshot, `steam_pulse.details` asks only for the games that have
+  no details stored yet: all of them the first time, then the few that enter the
+  ranking. The store publishes no limits, so requests go one at a time with a pause
+  between them, there is a cap per run, and it stops at the first response that is not
+  an answer about a game. A failure here never costs a snapshot.
 - **Nothing is thrown away.** A response that does not look right (an error status, a
   maintenance page, a changed format) is kept under `raw/_rejected/`, and the run is
   marked as failed.
@@ -50,6 +58,7 @@ GitHub Actions (twice an hour)  ->  steam_pulse.collect  ->  commit on the `data
 ```
 raw/concurrent_players/date=2026-10-12/20261012T154904Z.json
 raw/steam_users/date=2026-10-12/20261012T155449Z.json
+raw/app_details/date=2026-10-13/730.json
 raw/_rejected/<source>/date=.../....json
 ```
 
@@ -120,6 +129,7 @@ You only need [uv](https://docs.astral.sh/uv/).
 git clone https://github.com/att-22/steam-pulse.git
 cd steam-pulse
 uv run collect --output data    # one snapshot, written to data/raw/
+uv run details --output data    # the details of the games in it, one request each
 uv run pytest                   # the tests never call Steam
 ```
 
@@ -132,6 +142,6 @@ uv run load                           # creates steam_pulse.duckdb
 cd transform && uv run dbt build      # builds the models and runs their tests
 ```
 
-The collector uses the Python standard library only, so the hourly job installs
+The collection uses the Python standard library only, so the hourly job installs
 nothing: fewer steps, fewer things that can fail 8,760 times a year. Only the load needs
 a dependency (DuckDB), and the collector never imports it.
