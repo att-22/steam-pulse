@@ -20,7 +20,7 @@ sources:
               - not_null
               - accepted_values:
                   arguments:
-                    values: [concurrent_players, steam_users]
+                    values: [concurrent_players, steam_users, app_details]
           - name: snapshot_id
             description: The file name. The moment the data is from, in UTC.
             data_tests: [not_null]

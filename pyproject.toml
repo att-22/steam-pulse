@@ -11,6 +11,7 @@ dependencies = []
 
 [project.scripts]
 collect = "steam_pulse.collect:main"
+details = "steam_pulse.details:main"
 load = "steam_pulse.load:main"
 
 [build-system]
