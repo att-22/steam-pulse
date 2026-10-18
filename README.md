@@ -141,6 +141,15 @@ raw.snapshots
   no details for, is there with its details null and a stand-in name (`App 123`).
   Only what hardly ever changes is kept from the store; prices and review counts would
   be frozen at the day they were asked for.
+- **Only recent hours are rebuilt.** `fct_game_hourly`, the table that grows fastest,
+  is incremental: each run rebuilds the last 6 hours already built plus the new ones,
+  replacing whole hours. A later snapshot can replace the one chosen for an hour and
+  drop a game from it; replacing row by row would leave that game behind. CI builds the
+  sample in two steps and checks every table matches a build from scratch, and the
+  `Build` workflow keeps the warehouse between runs so the increments are real; when the
+  models change, nothing is restored and everything is rebuilt.
+- **Documented where it runs.** The models, their columns, tests and lineage are
+  published after every build: https://att-22.github.io/steam-pulse/
 - **Hours and days are cut in UTC**, explicitly, so the same snapshot falls on the same
   day whatever the time zone of the machine that runs the models.
 - **Tested three ways.** Unit tests feed the models hand-written snapshots, data tests
@@ -185,9 +194,10 @@ marts (DuckDB)  ->  steam_pulse.dashboard (queries)  ->  dashboard/app.py (Strea
 Collect finishes  ->  Build: load + dbt build + export  ->  `warehouse` branch  ->  hosted dashboard
 ```
 
-- **Rebuilt from scratch after every collection.** The `Build` workflow loads every
-  snapshot, builds the models with all their tests, and copies the tables the dashboard
-  reads into a small DuckDB file (about 2 MB, no raw data).
+- **Rebuilt after every collection.** The `Build` workflow loads the new snapshots into
+  the warehouse kept from the previous run, builds the models with all their tests, and
+  copies the tables the dashboard reads into a small DuckDB file (about 2 MB, no raw
+  data).
 - **A failed test publishes nothing.** If the models or their tests fail, the step
   fails and the dashboard keeps showing the last good build.
 - **One file on its own branch.** The file is pushed over the previous one on the

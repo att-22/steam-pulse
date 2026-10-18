@@ -1,9 +1,15 @@
-# After every collection: load the snapshots, build the models with their tests, and
-# publish the tables the dashboard reads on the `warehouse` branch.
+# After every collection: load the new snapshots, build the models with their tests,
+# publish the tables the dashboard reads on the `warehouse` branch, and publish the dbt
+# documentation on GitHub Pages.
 #
-# The warehouse is rebuilt from scratch each time from the `data` branch: it is
-# disposable, so there is nothing to keep between runs. If a model or a test fails, the
-# step fails and nothing is published: the dashboard keeps showing the last good build.
+# The warehouse is kept between runs in the Actions cache, so each run only loads the new
+# snapshot files and rebuilds the recent hours of the incremental models. It is still
+# disposable: the cache key includes a fingerprint of the models and of the load, so when
+# either changes nothing is restored and everything is rebuilt from the `data` branch.
+# A rebuild can also be asked for by hand (full_refresh).
+#
+# If a model or a test fails, the step fails: nothing is published, the cache is not
+# saved, and the dashboard keeps showing the last good build.
 name: Build
 
 on:
@@ -11,6 +17,11 @@ on:
     workflows: [Collect]
     types: [completed]
   workflow_dispatch:
+    inputs:
+      full_refresh:
+        description: Rebuild the warehouse from scratch instead of from the cached one
+        type: boolean
+        default: false
 
 permissions:
   contents: write           # to push the published file to the warehouse branch
@@ -43,12 +54,39 @@ jobs:
       - name: Install
         run: uv sync --locked --no-default-groups --group warehouse --group transform
 
-      - name: Load the snapshots
+      # A fingerprint of everything that decides what the warehouse holds: when it changes,
+      # a cached warehouse built with the old code must not be used.
+      - name: Fingerprint the models and the load
+        id: code
+        run: >-
+          echo "hash=${{ hashFiles('transform/**/*.sql', 'transform/**/*.yml',
+          'src/steam_pulse/load.py', 'uv.lock') }}" >> "$GITHUB_OUTPUT"
+
+      # The newest warehouse built with this same code, if there is one. Cache entries
+      # cannot be overwritten, so each run saves a new one and this takes the latest.
+      - name: Restore the warehouse of the previous run
+        id: restore
+        if: ${{ !inputs.full_refresh }}
+        uses: actions/cache/restore@v4
+        with:
+          path: steam_pulse.duckdb
+          key: warehouse-${{ steps.code.outputs.hash }}-${{ github.run_id }}
+          restore-keys: warehouse-${{ steps.code.outputs.hash }}-
+
+      - name: Load the new snapshots
         run: uv run --no-sync load --input data
 
+      # With a restored warehouse the incremental models only rebuild recent hours; with
+      # a new one they build everything.
       - name: Build the models and run their tests
         run: uv run --no-sync dbt build
         working-directory: transform
+
+      - name: Keep the warehouse for the next run
+        uses: actions/cache/save@v4
+        with:
+          path: steam_pulse.duckdb
+          key: warehouse-${{ steps.code.outputs.hash }}-${{ github.run_id }}
 
       - name: Export the tables the dashboard reads
         run: uv run --no-sync python -m steam_pulse.publish --output dashboard.duckdb
@@ -71,3 +109,30 @@ jobs:
           git push --force --quiet \
             "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" \
             warehouse
+
+      # The documentation of the models, with the columns and row counts of this build.
+      # --static puts everything in one file that needs no server.
+      - name: Generate the dbt documentation
+        run: |
+          uv run --no-sync dbt docs generate --static
+          mkdir -p "$RUNNER_TEMP/docs"
+          cp target/static_index.html "$RUNNER_TEMP/docs/index.html"
+        working-directory: transform
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ runner.temp }}/docs
+
+  docs:
+    name: Publish the dbt documentation
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write          # to publish on GitHub Pages
+      id-token: write       # to prove the publication comes from this workflow
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

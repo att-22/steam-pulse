@@ -54,6 +54,10 @@ jobs:
       - run: uv run load --input tests/sample --database ci.duckdb
       - run: uv run dbt build
         working-directory: transform
+      # Building in two steps (incremental) must give exactly what building at once gives.
+      # The split falls between the two snapshots of 13 Oct 17:00, so the second step
+      # replaces the snapshot of an hour already built.
+      - run: uv run python scripts/check_incremental.py --input tests/sample --split 20261013T173000Z
       # The dashboard, run headless on the tables just built: every section renders.
       - run: uv run pytest tests/test_dashboard_page.py
       # Again, with only what the hosted copy installs (dashboard/requirements.txt), so a
