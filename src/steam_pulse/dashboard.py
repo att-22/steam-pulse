@@ -10,6 +10,9 @@ ranking has no figure for that hour, never a zero.
 
 from __future__ import annotations
 
+import os
+import shutil
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -17,9 +20,21 @@ from typing import Any
 import duckdb
 import pandas as pd
 
+# The tables the dashboard reads, rebuilt after every collection by the Build workflow.
+PUBLISHED = "https://raw.githubusercontent.com/att-22/steam-pulse/warehouse/dashboard.duckdb"
+
 # Below this many collected hours, an average for one hour of the day is not shown:
 # with two or three samples it says more about those days than about that hour.
 MIN_SAMPLES_PER_HOUR = 3
+
+
+def download(url: str, target: Path) -> Path:
+    """Saves ``url`` at ``target``, written aside and renamed so it is never half there."""
+    temporary = target.with_name(target.name + ".tmp")
+    with urllib.request.urlopen(url, timeout=60) as response, temporary.open("wb") as file:
+        shutil.copyfileobj(response, file)
+    os.replace(temporary, target)
+    return target
 
 
 def connect(database: str | Path) -> duckdb.DuckDBPyConnection:

@@ -1,0 +1,73 @@
+# After every collection: load the snapshots, build the models with their tests, and
+# publish the tables the dashboard reads on the `warehouse` branch.
+#
+# The warehouse is rebuilt from scratch each time from the `data` branch: it is
+# disposable, so there is nothing to keep between runs. If a model or a test fails, the
+# step fails and nothing is published: the dashboard keeps showing the last good build.
+name: Build
+
+on:
+  workflow_run:
+    workflows: [Collect]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: write           # to push the published file to the warehouse branch
+
+# A newer build makes an older one pointless.
+concurrency:
+  group: build
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build and publish the warehouse
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v5
+
+      - name: Check out the data branch
+        uses: actions/checkout@v5
+        with:
+          ref: data
+          path: data
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      # Only what the load and the models need: no dashboard, no test tools.
+      - name: Install
+        run: uv sync --locked --no-default-groups --group warehouse --group transform
+
+      - name: Load the snapshots
+        run: uv run --no-sync load --input data
+
+      - name: Build the models and run their tests
+        run: uv run --no-sync dbt build
+        working-directory: transform
+
+      - name: Export the tables the dashboard reads
+        run: uv run --no-sync python -m steam_pulse.publish --output dashboard.duckdb
+
+      # One commit with one file, pushed over the previous one: the branch never grows.
+      # Every version can be rebuilt from the data branch, so no history is lost.
+      - name: Publish on the warehouse branch
+        env:
+          SOURCE: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          data_commit=$(git -C data rev-parse --short HEAD)
+          mkdir "$RUNNER_TEMP/warehouse"
+          cp dashboard.duckdb "$RUNNER_TEMP/warehouse/"
+          cd "$RUNNER_TEMP/warehouse"
+          git init --quiet --initial-branch warehouse
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add dashboard.duckdb
+          git commit --quiet --message "warehouse: built from data ${data_commit} with code ${SOURCE::7}"
+          git push --force --quiet \
+            "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" \
+            warehouse

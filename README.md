@@ -21,7 +21,7 @@ tables and a dashboard.
 | Collection of the details of each game (name, genres, release date) | Running |
 | Load of the raw snapshots into the warehouse | Working locally (DuckDB); cloud warehouse planned |
 | Modelling with dbt | Hourly and daily tables, and a table of games with their names |
-| Dashboard | Working locally; publishing planned |
+| Dashboard | Rebuilt after every collection; hosted on Streamlit Community Cloud |
 | Data quality and freshness alerts | Freshness check running; data tests in every build |
 
 ## How the collection works
@@ -163,6 +163,25 @@ marts (DuckDB)  ->  steam_pulse.dashboard (queries)  ->  dashboard/app.py (Strea
 - **Queries apart from the page.** Every figure comes from a function in
   `steam_pulse.dashboard` with its own tests; the page only lays them out, and CI
   renders it headless on the models built from the sample snapshots.
+
+## How the dashboard gets its data
+
+```
+Collect finishes  ->  Build: load + dbt build + export  ->  `warehouse` branch  ->  hosted dashboard
+```
+
+- **Rebuilt from scratch after every collection.** The `Build` workflow loads every
+  snapshot, builds the models with all their tests, and copies the tables the dashboard
+  reads into a small DuckDB file (about 2 MB, no raw data).
+- **A failed test publishes nothing.** If the models or their tests fail, the step
+  fails and the dashboard keeps showing the last good build.
+- **One file on its own branch.** The file is pushed over the previous one on the
+  `warehouse` branch, so the branch never grows; any version can be rebuilt from `data`.
+- **No cloud warehouse needed yet.** The hosted dashboard downloads that file and reads
+  it with DuckDB, fetching it again every 15 minutes. Locally it reads
+  `steam_pulse.duckdb` instead.
+- **Same versions everywhere.** The host installs from `dashboard/requirements.txt`,
+  exported from `uv.lock`; CI fails if the two drift apart.
 
 ## Run it locally
 
