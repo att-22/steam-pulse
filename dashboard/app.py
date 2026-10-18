@@ -109,7 +109,7 @@ else:
 st.dataframe(
     ranking.drop(columns=["appid"]),
     hide_index=True,
-    use_container_width=True,
+    width="stretch",
     column_config={
         "rank": st.column_config.NumberColumn("#", width="small"),
         "game": st.column_config.TextColumn("Game", width="large"),
@@ -146,7 +146,7 @@ st.altair_chart(
             alt.Tooltip("players:Q", format=","),
         ],
     ),
-    use_container_width=True,
+    width="stretch",
 )
 st.caption(
     "One point per hour collected. A gap in a line is an hour in which the game was "
@@ -170,7 +170,7 @@ with left:
                 alt.Tooltip("people:Q", format=","),
             ],
         ),
-        use_container_width=True,
+        width="stretch",
     )
 with right:
     st.subheader("When Steam plays")
@@ -192,7 +192,7 @@ with right:
                 alt.Tooltip("samples:Q", title="Hours it rests on"),
             ],
         ),
-        use_container_width=True,
+        width="stretch",
     )
     st.caption(
         f"Faded bars rest on fewer than {dashboard.MIN_SAMPLES_PER_HOUR} collected hours: "
@@ -204,7 +204,7 @@ st.header("In and out of the top 100")
 st.dataframe(
     dashboard.ranking_changes(db, limit=20),
     hide_index=True,
-    use_container_width=True,
+    width="stretch",
     column_config={
         "hour_at": st.column_config.DatetimeColumn("Hour (UTC)", format="YYYY-MM-DD HH:mm"),
         "change": st.column_config.TextColumn("Change"),
