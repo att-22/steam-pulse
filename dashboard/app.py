@@ -10,6 +10,7 @@ this file only lays them out.
 from __future__ import annotations
 
 import contextlib
+import importlib
 import os
 import sys
 import tempfile
@@ -22,8 +23,14 @@ import streamlit as st
 # The hosted copy installs the dependencies but not this repository as a package.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from steam_pulse import dashboard  # noqa: E402
-from steam_pulse.freshness import MAX_AGE_HOURS  # noqa: E402
+from steam_pulse import dashboard, freshness  # noqa: E402
+
+# Streamlit runs this file again on every interaction but keeps imported modules, and
+# after a deploy it did not reload them: the new page called queries the old module in
+# memory lacked. Reloading them on each run costs little and always uses the code on disk.
+importlib.reload(freshness)
+importlib.reload(dashboard)
+MAX_AGE_HOURS = freshness.MAX_AGE_HOURS
 
 LOCAL = Path(os.environ.get("STEAM_PULSE_DATABASE", "steam_pulse.duckdb"))
 REPOSITORY = "https://github.com/att-22/steam-pulse"
