@@ -56,6 +56,13 @@ jobs:
         working-directory: transform
       # The dashboard, run headless on the tables just built: every section renders.
       - run: uv run pytest tests/test_dashboard_page.py
+      # Again, with only what the hosted copy installs (dashboard/requirements.txt), so a
+      # dependency that only arrives here through another group cannot hide.
+      - name: Dashboard with the hosted dependencies only
+        run: |
+          uv venv --python 3.13 "$RUNNER_TEMP/hosted"
+          uv pip install --python "$RUNNER_TEMP/hosted" -r dashboard/requirements.txt pytest
+          PYTHONPATH=src "$RUNNER_TEMP/hosted/bin/python" -m pytest tests/test_dashboard_page.py
 
   # The hourly job runs with the runner's own Python and no installation step.
   # So does the freshness check. This checks that all three still work that way,
