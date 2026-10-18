@@ -22,7 +22,7 @@ tables and a dashboard.
 | Load of the raw snapshots into the warehouse | Working locally (DuckDB); cloud warehouse planned |
 | Modelling with dbt | Hourly and daily tables, and a table of games with their names |
 | Dashboard | Planned |
-| Data quality and freshness alerts | Planned |
+| Data quality and freshness alerts | Freshness check running; data tests in every build |
 
 ## How the collection works
 
@@ -73,6 +73,22 @@ Each file is the response wrapped in an envelope:
   "payload": { "response": { "last_update": 1791820144, "ranks": [ ... ] } }
 }
 ```
+
+## How a stopped collection is noticed
+
+```
+GitHub Actions (every three hours)  ->  steam_pulse.freshness  ->  fails if the newest ranking is too old
+```
+
+- **A collection that stops does not fail.** A scheduled run that never starts reports
+  nothing, so watching the runs is not enough. `steam_pulse.freshness` looks at the data:
+  the newest ranking on the `data` branch, by the moment Steam computed it.
+- **Twelve hours is the limit.** Scheduled runs have been seen up to 7.4 hours apart;
+  past twelve, the collection has stopped. A failed run is what GitHub notifies about.
+- **It shares the scheduler it watches.** If GitHub disables scheduled workflows (it does
+  after 60 days without activity in the repository), this stops too. It catches a
+  collection that keeps failing, is skipped for hours or stores stale answers; it does
+  not catch the scheduler going away.
 
 ## How the load works
 
@@ -137,6 +153,7 @@ git clone https://github.com/att-22/steam-pulse.git
 cd steam-pulse
 uv run collect --output data    # one snapshot, written to data/raw/
 uv run details --output data    # the details of the games in it, one request each
+uv run freshness --input data    # how old the newest ranking is
 uv run pytest                   # the tests never call Steam
 ```
 

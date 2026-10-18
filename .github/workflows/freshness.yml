@@ -1,0 +1,42 @@
+# Fails when the newest ranking on the `data` branch is too old.
+#
+# A collection that stops does not fail: a scheduled run that never starts reports
+# nothing. This workflow looks at the data instead, and a failed run is what GitHub
+# notifies about (by email, to whoever last changed the schedule below).
+#
+# It shares GitHub's scheduler with the collection, so it does not cover the scheduler
+# itself going away: after 60 days without activity in the repository GitHub disables
+# both. It does cover a collection that keeps failing, that is skipped for hours, or
+# that keeps storing a stale answer.
+name: Freshness
+
+on:
+  schedule:
+    # Every three hours, away from minute 0 and from the collection's minutes.
+    - cron: "41 */3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  freshness:
+    name: Newest ranking is recent
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v5
+
+      # Only the folder of the rankings: the check reads file names, nothing else.
+      - name: Check out the rankings on the data branch
+        uses: actions/checkout@v5
+        with:
+          ref: data
+          path: data
+          sparse-checkout: raw/concurrent_players
+
+      - name: Check the age of the newest ranking
+        run: python3 -m steam_pulse.freshness --input data
+        env:
+          PYTHONPATH: src
