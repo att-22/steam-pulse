@@ -80,27 +80,52 @@ if status["age_hours"] > MAX_AGE_HOURS:
 else:
     st.info(freshness)
 
+# ---------------------------------------------------------------- explore the history
+# Every section can look back: the ranking at any collected hour, the charts over any
+# span of days. By default, the newest hour and the whole history.
+collected = dashboard.hours(db)
+with st.sidebar:
+    st.header("Explore the history")
+    hour = st.selectbox(
+        "Ranking at (UTC)",
+        collected,
+        format_func=lambda moment: f"{moment:%a %d %b %Y, %H}:00",
+        help="Only the hours that were collected can be picked.",
+    )
+    first_day, last_day = collected[-1].date(), collected[0].date()
+    period = st.date_input(
+        "Charts from / to (UTC)",
+        value=(first_day, last_day),
+        min_value=first_day,
+        max_value=last_day,
+    )
+    # While the second day is being picked, the widget holds only the first.
+    start, end = (period[0], period[-1]) if period else (first_day, last_day)
+    st.caption(f"{len(collected)} hours collected since {first_day:%d %b %Y}.")
+is_latest = hour == collected[0]
+when = "right now" if is_latest else f"on {hour:%a %d %b %Y} at {hour:%H}:00 UTC"
+
 # ---------------------------------------------------------------- the pulse
+totals = dashboard.totals_at(db, hour) or {}
 online, in_game, ranked, share = st.columns(4)
-online.metric("Online on Steam", millions(status["users_online"]))
-in_game.metric("Playing something", millions(status["users_in_game"]))
-ranked.metric("Playing a top 100 game", millions(status["ranked_players"]))
+online.metric("Online on Steam", millions(totals.get("users_online")))
+in_game.metric("Playing something", millions(totals.get("users_in_game")))
+ranked.metric("Playing a top 100 game", millions(totals.get("ranked_players")))
 share.metric(
     "Top 100 share of players",
     "n/a"
-    if status["ranked_share_of_in_game"] is None
-    else f"{status['ranked_share_of_in_game']:.0%}",
+    if totals.get("ranked_share_of_in_game") is None
+    else f"{totals['ranked_share_of_in_game']:.0%}",
 )
 
-# ---------------------------------------------------------------- now
-st.header("Most played right now")
-ranking = dashboard.ranking_now(db, limit=25)
-hours = dashboard.previous_hour(db)
-if hours is None:
-    since, gap_help = "Change", "Only one hour has been collected so far."
+# ---------------------------------------------------------------- the ranking
+st.header(f"Most played {when}")
+ranking = dashboard.ranking_at(db, hour, limit=25)
+previous = dashboard.previous_hour(db, hour)
+if previous is None:
+    since, gap_help = "Change", "No hour was collected before this one."
 else:
-    latest, previous = hours
-    gap = int((latest - previous).total_seconds() // 3600)
+    gap = int((hour - previous).total_seconds() // 3600)
     since = f"Change since {previous:%H}:00 UTC ({gap} h)"
     gap_help = (
         f"Against the previous hour collected, {gap} h before. "
@@ -131,7 +156,7 @@ picked = st.multiselect(
     default=ranking["appid"].head(5).tolist(),
     format_func=names.get,
 )
-series = dashboard.players_over_time(db, [int(appid) for appid in picked])
+series = dashboard.players_over_time(db, [int(appid) for appid in picked], start, end)
 st.altair_chart(
     alt.Chart(series)
     # invalid=None: a null breaks the line. A game out of the ranking is not at zero.
@@ -158,7 +183,7 @@ left, right = st.columns(2)
 with left:
     st.subheader("Steam as a whole")
     st.altair_chart(
-        alt.Chart(dashboard.platform_over_time(db))
+        alt.Chart(dashboard.platform_over_time(db, start, end))
         .mark_line(point=True)
         .encode(
             x=alt.X("hour_at:T", title="Hour (UTC)"),
@@ -199,10 +224,42 @@ with right:
         "too few to say much about that hour of the day."
     )
 
+# ---------------------------------------------------------------- one game, day by day
+st.header("A game, day by day")
+appid = st.selectbox(
+    "Game",
+    options=list(names),
+    index=list(names).index(int(ranking["appid"].iloc[0])) if len(ranking) else 0,
+    format_func=names.get,
+)
+daily = dashboard.game_by_day(db, int(appid))
+st.dataframe(
+    daily,
+    hide_index=True,
+    width="stretch",
+    column_config={
+        "day": st.column_config.DateColumn("Day (UTC)", format="ddd DD MMM YYYY"),
+        "peak_players": st.column_config.NumberColumn("Peak", format="localized"),
+        "peak_hour_at": st.column_config.DatetimeColumn("Peak at (UTC)", format="HH:mm"),
+        "avg_players_while_ranked": st.column_config.NumberColumn(
+            "Average while ranked",
+            format="localized",
+            help="Over the hours it was in the ranking: its quieter hours are not known.",
+        ),
+        "best_rank": st.column_config.NumberColumn("Best rank"),
+        "hours_in_ranking": st.column_config.NumberColumn("Hours in ranking"),
+        "hours_collected": st.column_config.NumberColumn(
+            "Hours collected", help="Hours of that day with data at all. 24 on a full day."
+        ),
+    },
+)
+
 # ---------------------------------------------------------------- in and out
 st.header("In and out of the top 100")
+if not is_latest:
+    st.caption(f"Up to {hour:%a %d %b %Y, %H}:00 UTC.")
 st.dataframe(
-    dashboard.ranking_changes(db, limit=20),
+    dashboard.ranking_changes(db, until=hour, limit=20),
     hide_index=True,
     width="stretch",
     column_config={

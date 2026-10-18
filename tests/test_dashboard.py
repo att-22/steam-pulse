@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 import duckdb
 import pandas as pd
@@ -65,6 +65,15 @@ def warehouse(tmp_path):
                 ('2026-10-18 11:00:00+00', 570, 'left', 2, 800, 1),
                 ('2026-10-18 14:00:00+00', 440, 'entered', 1, 1500, 3),
                 ('2026-10-18 14:00:00+00', 570, 'entered', 3, 900, 3);
+            create table marts.fct_game_daily (
+                day date, appid integer, hours_in_ranking integer, hours_collected integer,
+                peak_players bigint, peak_hour_at timestamptz, avg_players_while_ranked double,
+                best_rank integer
+            );
+            insert into marts.fct_game_daily values
+                ('2026-10-17', 730, 1, 1, 900, '2026-10-17 09:00:00+00', 900, 1),
+                ('2026-10-18', 730, 3, 3, 1300, '2026-10-18 14:00:00+00', 1133.3, 1),
+                ('2026-10-18', 570, 2, 3, 900, '2026-10-18 14:00:00+00', 850, 2);
             """
         )
     connection = dashboard.connect(path)
@@ -88,12 +97,32 @@ def test_status_is_the_newest_hour_and_how_much_of_the_day_was_collected(warehou
     assert status["hours_collected_24h"] == 3
 
 
+def hour(day, at):
+    return datetime(2026, 10, day, at, tzinfo=UTC)
+
+
+def test_the_hours_to_pick_from_are_the_collected_ones_newest_first(warehouse):
+    assert dashboard.hours(warehouse) == [hour(18, 14), hour(18, 11), hour(18, 10), hour(17, 9)]
+
+
+def test_the_previous_hour_is_the_one_collected_before(warehouse):
+    assert dashboard.previous_hour(warehouse, hour(18, 14)) == hour(18, 11)
+    assert dashboard.previous_hour(warehouse, hour(18, 10)) == hour(17, 9)
+    assert dashboard.previous_hour(warehouse, hour(17, 9)) is None
+
+
+def test_totals_at_an_hour(warehouse):
+    assert dashboard.totals_at(warehouse, hour(18, 10)) == {
+        "users_online": 30,
+        "users_in_game": 10,
+        "ranked_players": 6,
+        "ranked_share_of_in_game": 0.6,
+    }
+    assert dashboard.totals_at(warehouse, hour(18, 12)) is None
+
+
 def test_ranking_compares_with_the_previous_hour_collected(warehouse):
-    assert dashboard.previous_hour(warehouse) == (
-        datetime(2026, 10, 18, 14, tzinfo=UTC),
-        datetime(2026, 10, 18, 11, tzinfo=UTC),
-    )
-    ranking = dashboard.ranking_now(warehouse).set_index("appid")
+    ranking = dashboard.ranking_at(warehouse, hour(18, 14)).set_index("appid")
 
     assert list(ranking["game"]) == ["App 440", "Counter-Strike 2", "Dota 2"]
     # 14:00 against 11:00, not against 10:00
@@ -106,8 +135,16 @@ def test_ranking_compares_with_the_previous_hour_collected(warehouse):
     assert list(ranking.loc[440, "genres"]) == []
 
 
+def test_the_ranking_of_an_older_hour(warehouse):
+    ranking = dashboard.ranking_at(warehouse, hour(18, 10)).set_index("appid")
+
+    assert list(ranking.index) == [730, 570]
+    # 09:00 the day before has no ranking for these games: nothing to compare with
+    assert ranking["players_change"].isna().all()
+
+
 def test_ranking_respects_the_limit(warehouse):
-    assert list(dashboard.ranking_now(warehouse, limit=1)["appid"]) == [440]
+    assert list(dashboard.ranking_at(warehouse, hour(18, 14), limit=1)["appid"]) == [440]
 
 
 def test_games_are_offered_most_played_first(warehouse):
@@ -123,6 +160,17 @@ def test_a_game_out_of_the_ranking_is_a_gap_not_a_zero(warehouse):
     assert by_hour[10] == 800
     assert by_hour[14] == 900
     assert pd.isna(by_hour[11])  # not in the ranking that hour
+
+
+def test_charts_can_be_limited_to_whole_utc_days(warehouse):
+    one_day = dashboard.players_over_time(warehouse, [730], date(2026, 10, 18), date(2026, 10, 18))
+    assert sorted(one_day["hour_at"].dt.hour) == [10, 11, 14]
+
+    until_17th = dashboard.platform_over_time(warehouse, last=date(2026, 10, 17))
+    assert set(until_17th["hour_at"]) == {hour(17, 9)}
+
+    from_18th = dashboard.platform_over_time(warehouse, first=date(2026, 10, 18))
+    assert set(from_18th["hour_at"]) == {hour(18, 10), hour(18, 11), hour(18, 14)}
 
 
 def test_no_games_picked_gives_an_empty_series(warehouse):
@@ -160,6 +208,23 @@ def test_ranking_changes_newest_first_with_names(warehouse):
     assert list(dashboard.ranking_changes(warehouse, limit=1)["game"]) == ["App 440"]
 
 
+def test_ranking_changes_up_to_an_hour(warehouse):
+    changes = dashboard.ranking_changes(warehouse, until=hour(18, 11))
+
+    assert list(changes["game"]) == ["Dota 2"]
+    assert list(changes["change"]) == ["left"]
+
+
+def test_a_game_day_by_day_newest_first(warehouse):
+    daily = dashboard.game_by_day(warehouse, 730)
+
+    assert list(daily["day"].dt.date) == [date(2026, 10, 18), date(2026, 10, 17)]
+    assert list(daily["peak_players"]) == [1300, 900]
+    # A whole number of players, not 1133.3
+    assert list(daily["avg_players_while_ranked"]) == [1133, 900]
+    assert dashboard.game_by_day(warehouse, 999).empty
+
+
 def test_status_is_none_on_an_empty_warehouse(tmp_path):
     path = tmp_path / "empty.duckdb"
     with duckdb.connect(str(path)) as db:
@@ -171,3 +236,23 @@ def test_status_is_none_on_an_empty_warehouse(tmp_path):
             " ranked_share_of_in_game double, top_appid integer, top_game_players bigint)"
         )
     assert dashboard.status(dashboard.connect(path), NOW) is None
+
+
+@pytest.mark.parametrize(
+    ("moment", "inside"),
+    [
+        ("2026-10-18 00:00:00+00", True),  # midnight starts the first day
+        ("2026-10-19 23:59:59+00", True),  # the last day is included whole
+        ("2026-10-17 23:59:59+00", False),
+        ("2026-10-20 00:00:00+00", False),  # midnight after the last day is out
+    ],
+)
+def test_a_period_is_whole_utc_days_both_included(moment, inside):
+    connection = duckdb.connect()
+    found = connection.execute(
+        f"select count(*) from (select timestamptz '{moment}' as hour_at) "
+        f"where {dashboard._in_period('hour_at')}",
+        dashboard._period(date(2026, 10, 18), date(2026, 10, 19)),
+    ).fetchone()[0]
+
+    assert found == (1 if inside else 0)

@@ -13,7 +13,7 @@ from __future__ import annotations
 import os
 import shutil
 import urllib.request
-from datetime import datetime
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -70,22 +70,42 @@ def status(connection: duckdb.DuckDBPyConnection, now: datetime) -> dict[str, An
     return found
 
 
-def previous_hour(connection: duckdb.DuckDBPyConnection) -> tuple[datetime, datetime] | None:
-    """The newest collected hour and the one collected before it, if there are two."""
+def hours(connection: duckdb.DuckDBPyConnection) -> list[datetime]:
+    """Every collected hour, newest first: the choices for the hour picker."""
+    rows = connection.execute(
+        "select hour_at from intermediate.int_hourly_snapshots order by hour_at desc"
+    ).fetchall()
+    return [row[0] for row in rows]
+
+
+def previous_hour(connection: duckdb.DuckDBPyConnection, hour: datetime) -> datetime | None:
+    """The hour collected before ``hour``, if there is one."""
+    return connection.execute(
+        "select max(hour_at) from intermediate.int_hourly_snapshots where hour_at < $hour",
+        {"hour": hour},
+    ).fetchone()[0]
+
+
+def totals_at(connection: duckdb.DuckDBPyConnection, hour: datetime) -> dict[str, Any] | None:
+    """People on Steam and in the ranking at ``hour``."""
     row = connection.execute(
         """
-        select max(hour_at), (
-            select max(hour_at) from intermediate.int_hourly_snapshots
-            where hour_at < (select max(hour_at) from intermediate.int_hourly_snapshots)
-        )
-        from intermediate.int_hourly_snapshots
-        """
+        select users_online, users_in_game, ranked_players, ranked_share_of_in_game
+        from marts.fct_platform_hourly
+        where hour_at = $hour
+        """,
+        {"hour": hour},
     ).fetchone()
-    return None if row is None or row[1] is None else (row[0], row[1])
+    if row is None:
+        return None
+    names = ["users_online", "users_in_game", "ranked_players", "ranked_share_of_in_game"]
+    return dict(zip(names, row, strict=True))
 
 
-def ranking_now(connection: duckdb.DuckDBPyConnection, limit: int = 25) -> pd.DataFrame:
-    """The most played games in the newest hour, with their names.
+def ranking_at(
+    connection: duckdb.DuckDBPyConnection, hour: datetime, limit: int = 25
+) -> pd.DataFrame:
+    """The most played games at ``hour``, with their names.
 
     The change is measured against the previous hour that was collected, which is not
     always the hour before: the page says how far apart the two are. It is null for a
@@ -93,14 +113,6 @@ def ranking_now(connection: duckdb.DuckDBPyConnection, limit: int = 25) -> pd.Da
     """
     return connection.execute(
         """
-        with hours as (
-            select
-                max(hour_at) as latest,
-                max(hour_at) filter (
-                    where hour_at < (select max(hour_at) from intermediate.int_hourly_snapshots)
-                ) as previous
-            from intermediate.int_hourly_snapshots
-        )
         select
             now.rank,
             games.display_name as game,
@@ -111,17 +123,19 @@ def ranking_now(connection: duckdb.DuckDBPyConnection, limit: int = 25) -> pd.Da
             coalesce(games.genres, []) as genres,
             now.appid
         from marts.fct_game_hourly as now
-        cross join hours
         inner join marts.dim_games as games
             on games.appid = now.appid
         left join marts.fct_game_hourly as before
             on before.appid = now.appid
-            and before.hour_at = hours.previous
-        where now.hour_at = hours.latest
+            and before.hour_at = (
+                select max(hour_at) from intermediate.int_hourly_snapshots
+                where hour_at < $hour
+            )
+        where now.hour_at = $hour
         order by now.rank
         limit $limit
         """,
-        {"limit": limit},
+        {"hour": hour, "limit": limit},
     ).df()
 
 
@@ -132,15 +146,38 @@ def games(connection: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     ).df()
 
 
-def players_over_time(connection: duckdb.DuckDBPyConnection, appids: list[int]) -> pd.DataFrame:
-    """Players per collected hour for these games.
+def _in_period(column: str) -> str:
+    """SQL condition: ``column`` is within the period given by $since and $before.
+
+    Either can be null, meaning no limit on that side. The bounds are worked out in
+    Python by ``_period``: casting a date parameter inside the query hit an internal
+    error in DuckDB 1.5.6 when the query read a view.
+    """
+    return f"($since is null or {column} >= $since) and ($before is null or {column} < $before)"
+
+
+def _period(first: date | None, last: date | None) -> dict[str, datetime | None]:
+    """Whole UTC days from ``first`` to ``last``, both included, as [since, before)."""
+    return {
+        "since": None if first is None else datetime.combine(first, time(), UTC),
+        "before": None if last is None else datetime.combine(last + timedelta(days=1), time(), UTC),
+    }
+
+
+def players_over_time(
+    connection: duckdb.DuckDBPyConnection,
+    appids: list[int],
+    first: date | None = None,
+    last: date | None = None,
+) -> pd.DataFrame:
+    """Players per collected hour for these games, between two days if given.
 
     One row per collected hour and game. When the game was not in the ranking in an hour
     that was collected, ``players`` is null: the chart breaks the line there instead of
     drawing it down to zero. Hours that were not collected at all have no row.
     """
     return connection.execute(
-        """
+        f"""
         select hours.hour_at, games.display_name as game, hourly.concurrent_players as players
         from intermediate.int_hourly_snapshots as hours
         cross join marts.dim_games as games
@@ -148,24 +185,29 @@ def players_over_time(connection: duckdb.DuckDBPyConnection, appids: list[int]) 
             on hourly.hour_at = hours.hour_at
             and hourly.appid = games.appid
         where games.appid in (select unnest($appids))
+          and {_in_period("hours.hour_at")}
         order by games.peak_players desc, hours.hour_at
         """,
-        {"appids": appids},
+        {"appids": appids, **_period(first, last)},
     ).df()
 
 
-def platform_over_time(connection: duckdb.DuckDBPyConnection) -> pd.DataFrame:
+def platform_over_time(
+    connection: duckdb.DuckDBPyConnection, first: date | None = None, last: date | None = None
+) -> pd.DataFrame:
     """People online and in game on all of Steam, per collected hour, long format."""
     return connection.execute(
-        """
+        f"""
         unpivot (
             select hour_at, users_online as "Online", users_in_game as "In game"
             from marts.fct_platform_hourly
+            where {_in_period("hour_at")}
         )
         on "Online", "In game"
         into name measure value people
         order by hour_at, measure
-        """
+        """,
+        _period(first, last),
     ).df()
 
 
@@ -187,8 +229,10 @@ def hour_of_day(connection: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     ).df()
 
 
-def ranking_changes(connection: duckdb.DuckDBPyConnection, limit: int = 20) -> pd.DataFrame:
-    """The latest games to enter or leave the ranking."""
+def ranking_changes(
+    connection: duckdb.DuckDBPyConnection, until: datetime | None = None, limit: int = 20
+) -> pd.DataFrame:
+    """The latest games to enter or leave the ranking, up to ``until`` if given."""
     return connection.execute(
         """
         select
@@ -201,8 +245,29 @@ def ranking_changes(connection: duckdb.DuckDBPyConnection, limit: int = 20) -> p
         from marts.fct_ranking_changes as changes
         inner join marts.dim_games as games
             on games.appid = changes.appid
+        where $until is null or changes.hour_at <= $until
         order by changes.hour_at desc, changes.change, changes.rank_when_seen
         limit $limit
         """,
-        {"limit": limit},
+        {"until": until, "limit": limit},
+    ).df()
+
+
+def game_by_day(connection: duckdb.DuckDBPyConnection, appid: int) -> pd.DataFrame:
+    """One row per UTC day in which the game was in the ranking, newest first."""
+    return connection.execute(
+        """
+        select
+            day,
+            peak_players,
+            peak_hour_at,
+            round(avg_players_while_ranked)::bigint as avg_players_while_ranked,
+            best_rank,
+            hours_in_ranking,
+            hours_collected
+        from marts.fct_game_daily
+        where appid = $appid
+        order by day desc
+        """,
+        {"appid": appid},
     ).df()

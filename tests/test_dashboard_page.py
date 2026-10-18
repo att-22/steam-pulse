@@ -31,8 +31,21 @@ def test_the_page_renders_every_section_without_errors():
         "Players over time",
         "Steam as a whole",
         "When Steam plays",
+        "A game, day by day",
         "In and out of the top 100",
     ]:
         assert section in headers
     assert len(page.metric) == 4
-    assert "Not affiliated with Valve" in page.caption[-1].value
+    assert any("Not affiliated with Valve" in caption.value for caption in page.caption)
+
+
+def test_an_older_hour_can_be_picked():
+    page = AppTest.from_file(str(APP), default_timeout=60).run()
+    picker = page.sidebar.selectbox[0]
+    assert len(picker.options) > 1
+
+    page = picker.select_index(len(picker.options) - 1).run()
+
+    assert not page.exception
+    assert page.header[0].value.startswith("Most played on ")
+    assert "A game, day by day" in [header.value for header in page.header]

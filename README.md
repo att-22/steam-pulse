@@ -165,6 +165,9 @@ marts (DuckDB)  ->  steam_pulse.dashboard (queries)  ->  dashboard/app.py (Strea
 - **What it answers.** What is being played right now; how each game moves hour by
   hour; how many people are on Steam and when they play; which games enter and leave
   the ranking.
+- **Every collected hour can be looked at.** The sidebar picks the hour the ranking and
+  the totals show (the newest by default) and the days the charts cover, and each game
+  has its own table day by day.
 - **It says how fresh it is.** The newest snapshot, how old it is and how many of the
   last 24 hours were collected sit at the top of the page, and turn into a warning past
   the same limit as the freshness check.
