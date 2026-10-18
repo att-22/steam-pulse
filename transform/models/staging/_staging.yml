@@ -47,6 +47,51 @@ models:
         description: People connected to Steam and playing something.
         data_tests: [not_null]
 
+  - name: stg_app_details
+    description: >
+      One row per game the store gave details for. Asked for once per game, so it keeps
+      only what hardly ever changes: no prices, discounts or review counts.
+    columns:
+      - name: appid
+        description: The identifier Steam gives the game, the one the ranking uses.
+        data_tests: [unique, not_null]
+      - name: name
+        description: The name of the game in the store.
+        data_tests: [not_null]
+      - name: app_type
+        description: What the store says it is.
+        data_tests:
+          - not_null
+          # A type never seen before is worth a look, not a failed build.
+          - accepted_values:
+              arguments:
+                values: [game, demo, mod, dlc, advertising]
+              config:
+                severity: warn
+      - name: is_free
+        description: True for free to play.
+        data_tests: [not_null]
+      - name: release_date
+        description: The release date. Null when the store gives no date, as for games not out yet.
+      - name: release_date_text
+        description: The release date as the store wrote it ("Coming soon", "To be announced"...). Null when empty.
+      - name: coming_soon
+        description: True while the game is not out yet.
+        data_tests: [not_null]
+      - name: genres
+        description: The genres the store lists, as a list. Null when it lists none.
+      - name: developers
+        description: Who made it, as a list.
+      - name: publishers
+        description: Who publishes it, as a list.
+      - name: base_appid
+        description: For a demo or a mod, the game it belongs to. Null otherwise.
+      - name: header_image_url
+        description: The banner image of the store page.
+      - name: details_collected_at
+        description: When the details were asked for.
+        data_tests: [not_null]
+
 unit_tests:
   - name: ranking_is_unfolded_into_one_row_per_game
     model: stg_concurrent_players
@@ -137,3 +182,56 @@ unit_tests:
           snapshot_at: 2026-10-12 15:17:03+00
           users_online: 950
           users_in_game: null
+
+  - name: store_details_are_reduced_to_what_does_not_change
+    model: stg_app_details
+    given:
+      - input: source('raw', 'snapshots')
+        format: sql
+        rows: |
+          select
+              'app_details' as source, '730' as snapshot_id, false as rejected,
+              timestamptz '2026-10-13 22:01:00+00' as collected_at,
+              '{"730": {"success": true, "data": {
+                  "type": "game", "name": "Counter-Strike 2", "steam_appid": 730, "is_free": true,
+                  "release_date": {"coming_soon": false, "date": "Aug 21, 2012"},
+                  "genres": [{"id": "1", "description": "Action"}, {"id": "37", "description": "Free To Play"}],
+                  "developers": ["Valve"], "publishers": ["Valve"],
+                  "header_image": "https://example.com/730.jpg",
+                  "price_overview": {"final": 0}
+              }}}'::json as payload
+          union all
+          -- A demo of a game not out yet, and with no genres listed
+          select
+              'app_details', '4349200', false,
+              timestamptz '2026-10-14 10:00:00+00',
+              '{"4349200": {"success": true, "data": {
+                  "type": "demo", "name": "Some Demo", "steam_appid": 4349200, "is_free": true,
+                  "release_date": {"coming_soon": true, "date": "To be announced"},
+                  "fullgame": {"appid": "4348910", "name": "Some Game"},
+                  "developers": ["Studio"], "publishers": ["Studio"]
+              }}}'::json
+          union all
+          select
+              'app_details', '2676230', false,
+              timestamptz '2026-10-14 11:00:00+00',
+              '{"2676230": {"success": true, "data": {
+                  "type": "game", "name": "No Date", "steam_appid": 2676230, "is_free": false,
+                  "release_date": {"coming_soon": true, "date": ""}
+              }}}'::json
+          union all
+          -- Rejected answers and other sources are left out
+          select
+              'app_details', '999', true,
+              timestamptz '2026-10-14 11:00:00+00',
+              '{"999": {"success": false}}'::json
+          union all
+          select
+              'steam_users', '20261014T110000Z', false,
+              timestamptz '2026-10-14 11:00:00+00',
+              '{"users_online": "1", "users_ingame": "1"}'::json
+    expect:
+      rows:
+        - {appid: 730, name: Counter-Strike 2, app_type: game, is_free: true, release_date: "2012-08-21", release_date_text: "Aug 21, 2012", coming_soon: false, genres: [Action, Free To Play], developers: [Valve], publishers: [Valve], base_appid: null, header_image_url: "https://example.com/730.jpg", details_collected_at: "2026-10-13 22:01:00+00"}
+        - {appid: 4349200, name: Some Demo, app_type: demo, is_free: true, release_date: null, release_date_text: To be announced, coming_soon: true, genres: null, developers: [Studio], publishers: [Studio], base_appid: 4348910, header_image_url: null, details_collected_at: "2026-10-14 10:00:00+00"}
+        - {appid: 2676230, name: No Date, app_type: game, is_free: false, release_date: null, release_date_text: null, coming_soon: true, genres: null, developers: null, publishers: null, base_appid: null, header_image_url: null, details_collected_at: "2026-10-14 11:00:00+00"}

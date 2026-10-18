@@ -15,7 +15,13 @@ models:
         data_tests: [not_null]
       - name: appid
         description: The identifier Steam gives the game.
-        data_tests: [not_null]
+        data_tests:
+          - not_null
+          # Every figure can be shown with its game.
+          - relationships:
+              arguments:
+                to: ref('dim_games')
+                field: appid
       - name: snapshot_id
         description: The snapshot the figures come from.
         data_tests: [not_null]
@@ -32,6 +38,55 @@ models:
         description: Players now minus players exactly one hour before. Null when that hour is not known for the game.
       - name: positions_gained_1h
         description: Positions climbed since exactly one hour before; negative when it fell. Null when that hour is not known for the game.
+
+  - name: dim_games
+    description: >
+      One row per game that has ever been in the ranking, with its store details when
+      they have been collected. A game without them is still here, with them null.
+    columns:
+      - name: appid
+        description: The identifier Steam gives the game.
+        data_tests: [unique, not_null]
+      - name: display_name
+        description: The name of the game, or "App <appid>" while its details are missing.
+        data_tests: [not_null]
+      - name: name
+        description: The name of the game in the store. Null without details.
+      - name: app_type
+        description: game, demo, mod... Null without details.
+      - name: is_free
+        description: True for free to play. Null without details.
+      - name: release_date
+        description: The release date. Null without details or when the store gives no date.
+      - name: release_date_text
+        description: The release date as the store wrote it.
+      - name: coming_soon
+        description: True while the game is not out yet.
+      - name: genres
+        description: The genres the store lists, as a list.
+      - name: developers
+        description: Who made it, as a list.
+      - name: publishers
+        description: Who publishes it, as a list.
+      - name: base_appid
+        description: For a demo or a mod, the game it belongs to.
+      - name: header_image_url
+        description: The banner image of the store page.
+      - name: has_details
+        description: Whether the store details have been collected.
+        data_tests: [not_null]
+      - name: first_seen_at
+        description: The first snapshot in which the game was in the ranking.
+        data_tests: [not_null]
+      - name: last_seen_at
+        description: The last snapshot in which the game was in the ranking.
+        data_tests: [not_null]
+      - name: best_rank
+        description: The highest position it has reached.
+        data_tests: [not_null]
+      - name: peak_players
+        description: The most players it has had in any snapshot.
+        data_tests: [not_null]
 
   - name: fct_platform_hourly
     description: One row per hour with data, the ranking as a whole next to the totals of all of Steam.
@@ -234,3 +289,23 @@ unit_tests:
         - {hour_at: "2026-10-12 15:00:00+00", previous_hour_at: "2026-10-12 14:00:00+00", hours_since_previous: 1, appid: 570, change: left, rank_when_seen: 2, players_when_seen: 800}
         - {hour_at: "2026-10-12 18:00:00+00", previous_hour_at: "2026-10-12 15:00:00+00", hours_since_previous: 3, appid: 570, change: entered, rank_when_seen: 1, players_when_seen: 850}
         - {hour_at: "2026-10-12 18:00:00+00", previous_hour_at: "2026-10-12 15:00:00+00", hours_since_previous: 3, appid: 440, change: left, rank_when_seen: 2, players_when_seen: 700}
+
+  - name: every_ranked_game_is_kept_with_or_without_details
+    model: dim_games
+    given:
+      - input: ref('stg_concurrent_players')
+        rows:
+          - {appid: 730, snapshot_at: "2026-10-12 14:00:00+00", rank: 2, concurrent_players: 900}
+          - {appid: 730, snapshot_at: "2026-10-12 15:00:00+00", rank: 1, concurrent_players: 1200}
+          - {appid: 730, snapshot_at: "2026-10-12 16:00:00+00", rank: 3, concurrent_players: 700}
+          # In the ranking, but the store has not answered for it yet
+          - {appid: 440, snapshot_at: "2026-10-12 16:00:00+00", rank: 2, concurrent_players: 800}
+      - input: ref('stg_app_details')
+        rows:
+          - {appid: 730, name: Counter-Strike 2, app_type: game, is_free: true}
+          # Details of a game no longer in the data: not a game of the ranking
+          - {appid: 999, name: Old Game, app_type: game, is_free: false}
+    expect:
+      rows:
+        - {appid: 730, display_name: Counter-Strike 2, name: Counter-Strike 2, app_type: game, is_free: true, has_details: true, first_seen_at: "2026-10-12 14:00:00+00", last_seen_at: "2026-10-12 16:00:00+00", best_rank: 1, peak_players: 1200}
+        - {appid: 440, display_name: App 440, name: null, app_type: null, is_free: null, has_details: false, first_seen_at: "2026-10-12 16:00:00+00", last_seen_at: "2026-10-12 16:00:00+00", best_rank: 2, peak_players: 800}
