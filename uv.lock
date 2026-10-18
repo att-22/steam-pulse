@@ -1695,6 +1695,7 @@ default-groups = ["dashboard", "dev", "transform", "warehouse"]
 
 [package.dev-dependencies]
 dashboard = [
+    { name = "pytz" },
     { name = "streamlit" },
 ]
 dev = [
@@ -1711,7 +1712,10 @@ warehouse = [
 [package.metadata]
 
 [package.metadata.requires-dev]
-dashboard = [{ name = "streamlit", specifier = ">=1.66.0" }]
+dashboard = [
+    { name = "pytz", specifier = ">=2026.5" },
+    { name = "streamlit", specifier = ">=1.66.0" },
+]
 dev = [
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "ruff", specifier = ">=0.17.0" },
