@@ -49,7 +49,8 @@ jobs:
         working-directory: transform
 
   # The hourly job runs with the runner's own Python and no installation step.
-  # This checks that both of its commands still work that way, without calling Steam.
+  # So does the freshness check. This checks that all three still work that way,
+  # without calling Steam.
   collector:
     name: Collector runs without installing
     runs-on: ubuntu-latest
@@ -59,5 +60,8 @@ jobs:
         env:
           PYTHONPATH: src
       - run: python3 -m steam_pulse.details --help
+        env:
+          PYTHONPATH: src
+      - run: python3 -m steam_pulse.freshness --help
         env:
           PYTHONPATH: src
