@@ -13,6 +13,8 @@ tables and a dashboard.
 > offered as is, with no guarantee of accuracy. No data about individual Steam users is
 > collected or stored: only public, aggregate counts.
 
+![The dashboard: what is being played right now](docs/images/dashboard-now.png)
+
 ## Status
 
 | Stage | State |
@@ -146,6 +148,14 @@ raw.snapshots
 
 ## The dashboard
 
+A web page, built with Streamlit, that reads the tables built by the models. The top of
+the page is at the start of this README; further down, each game hour by hour, and Steam
+as a whole:
+
+![Players of each game, hour by hour](docs/images/dashboard-over-time.png)
+
+![People on Steam over time, and by hour of the day](docs/images/dashboard-steam.png)
+
 ```
 marts (DuckDB)  ->  steam_pulse.dashboard (queries)  ->  dashboard/app.py (Streamlit)
 ```
@@ -187,9 +197,21 @@ Collect finishes  ->  Build: load + dbt build + export  ->  `warehouse` branch  
 
 You only need [uv](https://docs.astral.sh/uv/).
 
+### The dashboard
+
 ```bash
 git clone https://github.com/att-22/steam-pulse.git
 cd steam-pulse
+uv run streamlit run dashboard/app.py
+```
+
+It opens in the browser at http://localhost:8501. With no warehouse of your own it
+downloads the latest published data, so nothing else is needed. If there is a
+`steam_pulse.duckdb` next to the code (see below), it reads that one instead.
+
+### The pipeline, step by step
+
+```bash
 uv run collect --output data    # one snapshot, written to data/raw/
 uv run details --output data    # the details of the games in it, one request each
 uv run freshness --input data    # how old the newest ranking is
@@ -203,7 +225,7 @@ load it into a local DuckDB file:
 git worktree add data origin/data     # the snapshots, in data/raw/
 uv run load                           # creates steam_pulse.duckdb
 cd transform && uv run dbt build      # builds the models and runs their tests
-cd .. && uv run streamlit run dashboard/app.py   # the dashboard, on http://localhost:8501
+cd .. && uv run streamlit run dashboard/app.py   # the dashboard, now on your own data
 ```
 
 The collection uses the Python standard library only, so the hourly job installs
