@@ -18,9 +18,9 @@ tables and a dashboard.
 | Stage | State |
 |---|---|
 | Hourly collection of raw snapshots | Running |
-| Collection of the details of each game (name, genres, release date) | Running; not modelled yet |
+| Collection of the details of each game (name, genres, release date) | Running |
 | Load of the raw snapshots into the warehouse | Working locally (DuckDB); cloud warehouse planned |
-| Modelling with dbt | Hourly and daily tables built; game names planned |
+| Modelling with dbt | Hourly and daily tables, and a table of games with their names |
 | Dashboard | Planned |
 | Data quality and freshness alerts | Planned |
 
@@ -96,11 +96,13 @@ Each file is the response wrapped in an envelope:
 raw.snapshots
   -> staging        stg_concurrent_players   one row per game and snapshot
                     stg_steam_users          one row per snapshot
+                    stg_app_details          one row per game with store details
   -> intermediate   int_hourly_snapshots     the snapshot that stands for each hour
   -> marts          fct_game_hourly          one row per game and hour
                     fct_game_daily           one row per game and day
                     fct_platform_hourly      one row per hour, with the totals of Steam
                     fct_ranking_changes      games entering and leaving the ranking
+                    dim_games                one row per game ever ranked, with its details
 ```
 
 - **Staging only renames and types.** The ranking is unfolded into one row per game,
@@ -114,6 +116,11 @@ raw.snapshots
 - **One snapshot per hour, chosen once.** Runs can be late, repeated or launched by
   hand. `int_hourly_snapshots` picks the last snapshot of each hour and every table
   builds on that choice.
+- **Every game keeps its figures, details or not.** `dim_games` lists the games from
+  the ranking, not from the store: a game that has just entered, or that the store has
+  no details for, is there with its details null and a stand-in name (`App 123`).
+  Only what hardly ever changes is kept from the store; prices and review counts would
+  be frozen at the day they were asked for.
 - **Hours and days are cut in UTC**, explicitly, so the same snapshot falls on the same
   day whatever the time zone of the machine that runs the models.
 - **Tested three ways.** Unit tests feed the models hand-written snapshots, data tests
