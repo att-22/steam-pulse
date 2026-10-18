@@ -1,0 +1,1 @@
+{"source": "steam_users", "url": "https://www.valvesoftware.com/about/stats", "collected_at": "2026-10-18T14:51:00Z", "http_status": 200, "payload": {"users_online": "42,324,383", "users_ingame": "13,930,944"}}
