@@ -189,6 +189,9 @@ models:
 unit_tests:
   - name: changes_compare_with_exactly_one_hour_before
     model: fct_game_hourly
+    overrides:
+      macros:
+        is_incremental: false
     given:
       - input: ref('int_hourly_snapshots')
         rows:
@@ -214,6 +217,53 @@ unit_tests:
         - {hour_at: "2026-10-12 15:00:00+00", appid: 440, snapshot_id: B, snapshot_at: "2026-10-12 15:50:00+00", rank: 2, concurrent_players: 900, players_change_1h: null, positions_gained_1h: null}
         # 16:00 was not collected: unknown, not compared with 15:00
         - {hour_at: "2026-10-12 17:00:00+00", appid: 730, snapshot_id: C, snapshot_at: "2026-10-12 17:10:00+00", rank: 1, concurrent_players: 1100, players_change_1h: null, positions_gained_1h: null}
+
+  - name: an_incremental_run_replaces_whole_recent_hours
+    model: fct_game_hourly
+    overrides:
+      macros:
+        is_incremental: true
+      vars:
+        lookback_hours: 2
+    given:
+      # Already built. The newest hour is 15:00, so with a 2-hour window 13:00 onwards is
+      # rebuilt, reading from 12:00 to find the hour before 13:00.
+      # Written as SQL with its types: on a warehouse built from scratch the table does not
+      # exist yet, and dbt cannot look its columns up.
+      - input: this
+        format: sql
+        rows: |
+          select * from (values
+              (timestamptz '2026-10-12 10:00:00+00', 730, 'OLD', timestamptz '2026-10-12 10:50:00+00', 1, 999::bigint, null::bigint, null::integer),
+              (timestamptz '2026-10-12 15:00:00+00', 730, 'B1', timestamptz '2026-10-12 15:20:00+00', 1, 1000::bigint, null::bigint, null::integer),
+              -- In the first snapshot of 15:00 and not in the second: it must not stay behind
+              (timestamptz '2026-10-12 15:00:00+00', 440, 'B1', timestamptz '2026-10-12 15:20:00+00', 2, 500::bigint, null::bigint, null::integer)
+          ) as t(hour_at, appid, snapshot_id, snapshot_at, rank, concurrent_players,
+                 players_change_1h, positions_gained_1h)
+      - input: ref('int_hourly_snapshots')
+        rows:
+          - {hour_at: "2026-10-12 10:00:00+00", snapshot_id: A0}
+          - {hour_at: "2026-10-12 12:00:00+00", snapshot_id: A2}
+          - {hour_at: "2026-10-12 13:00:00+00", snapshot_id: A3}
+          # A later snapshot now stands for 15:00, and 16:00 is new
+          - {hour_at: "2026-10-12 15:00:00+00", snapshot_id: B2}
+          - {hour_at: "2026-10-12 16:00:00+00", snapshot_id: C}
+      - input: ref('stg_concurrent_players')
+        rows:
+          - {snapshot_id: A0, snapshot_at: "2026-10-12 10:55:00+00", appid: 730, rank: 1, concurrent_players: 1}
+          - {snapshot_id: A2, snapshot_at: "2026-10-12 12:55:00+00", appid: 730, rank: 1, concurrent_players: 800}
+          - {snapshot_id: A3, snapshot_at: "2026-10-12 13:55:00+00", appid: 730, rank: 1, concurrent_players: 900}
+          - {snapshot_id: B2, snapshot_at: "2026-10-12 15:50:00+00", appid: 730, rank: 1, concurrent_players: 1100}
+          - {snapshot_id: B2, snapshot_at: "2026-10-12 15:50:00+00", appid: 570, rank: 2, concurrent_players: 600}
+          - {snapshot_id: C, snapshot_at: "2026-10-12 16:10:00+00", appid: 730, rank: 1, concurrent_players: 1200}
+    # What the run produces: the rows for the hours it rebuilds. Every hour among them is
+    # deleted from the table first, so 440 at 15:00 goes and 10:00 is left as it was.
+    expect:
+      rows:
+        - {hour_at: "2026-10-12 13:00:00+00", appid: 730, snapshot_id: A3, snapshot_at: "2026-10-12 13:55:00+00", rank: 1, concurrent_players: 900, players_change_1h: 100, positions_gained_1h: 0}
+        - {hour_at: "2026-10-12 15:00:00+00", appid: 730, snapshot_id: B2, snapshot_at: "2026-10-12 15:50:00+00", rank: 1, concurrent_players: 1100, players_change_1h: null, positions_gained_1h: null}
+        - {hour_at: "2026-10-12 15:00:00+00", appid: 570, snapshot_id: B2, snapshot_at: "2026-10-12 15:50:00+00", rank: 2, concurrent_players: 600, players_change_1h: null, positions_gained_1h: null}
+        - {hour_at: "2026-10-12 16:00:00+00", appid: 730, snapshot_id: C, snapshot_at: "2026-10-12 16:10:00+00", rank: 1, concurrent_players: 1200, players_change_1h: 100, positions_gained_1h: 0}
 
   - name: ranking_is_summed_and_paired_with_the_totals_collected_with_it
     model: fct_platform_hourly

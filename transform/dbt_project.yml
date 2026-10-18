@@ -8,6 +8,11 @@ test-paths: ["tests"]
 target-path: target
 clean-targets: ["target", "dbt_packages"]
 
+vars:
+  # How many of the hours already built an incremental run rebuilds. A second snapshot of
+  # an hour arrives within the same hour, and a scheduled run can come hours late.
+  lookback_hours: 6
+
 models:
   steam_pulse:
     # One row per thing Steam reported, with proper names and types, and nothing else.
