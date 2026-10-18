@@ -13,6 +13,8 @@ tables and a dashboard.
 > offered as is, with no guarantee of accuracy. No data about individual Steam users is
 > collected or stored: only public, aggregate counts.
 
+**Dashboard: https://steam-pulse-att.streamlit.app** (it may take a few seconds to wake up)
+
 ![The dashboard: what is being played right now](docs/images/dashboard-now.png)
 
 ## Status
@@ -21,9 +23,9 @@ tables and a dashboard.
 |---|---|
 | Hourly collection of raw snapshots | Running |
 | Collection of the details of each game (name, genres, release date) | Running |
-| Load of the raw snapshots into the warehouse | Working locally (DuckDB); cloud warehouse planned |
+| Load of the raw snapshots into the warehouse | Runs after every collection (DuckDB); cloud warehouse planned |
 | Modelling with dbt | Hourly and daily tables, and a table of games with their names |
-| Dashboard | Rebuilt after every collection; hosted on Streamlit Community Cloud |
+| Dashboard | [Live](https://steam-pulse-att.streamlit.app), rebuilt after every collection |
 | Data quality and freshness alerts | Freshness check running; data tests in every build |
 
 ## How the collection works
