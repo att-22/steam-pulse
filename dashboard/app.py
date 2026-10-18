@@ -1,31 +1,50 @@
 """What is being played on Steam, hour by hour: the dashboard.
 
 Run it with ``uv run streamlit run dashboard/app.py``. It reads the tables built by the
-models from the DuckDB file named by STEAM_PULSE_DATABASE (default: steam_pulse.duckdb).
-The figures come from ``steam_pulse.dashboard``; this file only lays them out.
+models from, in this order: the DuckDB file named by STEAM_PULSE_DATABASE; a local
+steam_pulse.duckdb; or the file the Build workflow publishes after every collection,
+which is what the hosted copy uses. The figures come from ``steam_pulse.dashboard``;
+this file only lays them out.
 """
 
 from __future__ import annotations
 
+import contextlib
 import os
+import sys
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
 import altair as alt
 import streamlit as st
 
-from steam_pulse import dashboard
-from steam_pulse.freshness import MAX_AGE_HOURS
+# The hosted copy installs the dependencies but not this repository as a package.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-DATABASE = Path(os.environ.get("STEAM_PULSE_DATABASE", "steam_pulse.duckdb"))
+from steam_pulse import dashboard  # noqa: E402
+from steam_pulse.freshness import MAX_AGE_HOURS  # noqa: E402
+
+LOCAL = Path(os.environ.get("STEAM_PULSE_DATABASE", "steam_pulse.duckdb"))
 REPOSITORY = "https://github.com/att-22/steam-pulse"
 
 st.set_page_config(page_title="steam-pulse", page_icon="🎮", layout="wide")
 
 
-@st.cache_resource
+# The published file changes after each collection: fetch it again every 15 minutes.
+@st.cache_resource(ttl=15 * 60, show_spinner="Fetching the latest data...")
 def connection():
-    return dashboard.connect(DATABASE)
+    if LOCAL.exists():
+        return dashboard.connect(LOCAL)
+    folder = Path(tempfile.gettempdir())
+    # A new name each time: the copy being read by the previous connection is left alone
+    # while the new one downloads. Older copies are removed so they do not pile up.
+    for old in folder.glob("steam_pulse_*.duckdb"):
+        # On Windows a file still open cannot be removed; it goes next time.
+        with contextlib.suppress(OSError):
+            old.unlink(missing_ok=True)
+    target = folder / f"steam_pulse_{datetime.now(UTC):%Y%m%dT%H%M%S}.duckdb"
+    return dashboard.connect(dashboard.download(dashboard.PUBLISHED, target))
 
 
 def millions(value: float | None) -> str:
@@ -39,11 +58,11 @@ st.caption(
     "history is built from a snapshot collected about every hour."
 )
 
-if not DATABASE.exists():
-    st.error(f"No warehouse at `{DATABASE}`. Build it with `uv run load` and `dbt build`.")
+try:
+    db = connection()
+except OSError as error:
+    st.error(f"The data could not be fetched ({error}). Try again in a few minutes.")
     st.stop()
-
-db = connection()
 now = datetime.now(UTC)
 status = dashboard.status(db, now)
 if status is None:

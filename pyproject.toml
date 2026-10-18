@@ -14,6 +14,7 @@ collect = "steam_pulse.collect:main"
 details = "steam_pulse.details:main"
 freshness = "steam_pulse.freshness:main"
 load = "steam_pulse.load:main"
+publish = "steam_pulse.publish:main"
 
 [build-system]
 requires = ["hatchling"]

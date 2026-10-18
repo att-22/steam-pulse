@@ -15,6 +15,13 @@ jobs:
       - uses: astral-sh/setup-uv@v7
       - run: uv run --locked ruff check .
       - run: uv run --locked ruff format --check .
+      # The hosted dashboard installs from dashboard/requirements.txt, exported from the
+      # lock file. Exporting again must change nothing, or the two have drifted apart.
+      - run: >-
+          uv export --no-default-groups --group dashboard --group warehouse
+          --no-emit-project --no-hashes --format requirements-txt
+          -o dashboard/requirements.txt --quiet
+      - run: git diff --exit-code dashboard/requirements.txt
 
   test:
     name: Tests (${{ matrix.os }})
