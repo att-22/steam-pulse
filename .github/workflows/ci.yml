@@ -31,8 +31,8 @@ jobs:
       - run: uv sync --locked
       - run: uv run pytest
 
-  # Loads a few real snapshots kept in the repository and builds every model on them,
-  # with all their tests. No warehouse to connect to: it is a DuckDB file on the runner.
+  # Loads a few real snapshots kept in the repository, builds every model on them with
+  # all their tests, and renders the dashboard on the result. No warehouse to connect to: it is a DuckDB file on the runner.
   models:
     name: Models (dbt)
     runs-on: ubuntu-latest
@@ -47,6 +47,8 @@ jobs:
       - run: uv run load --input tests/sample --database ci.duckdb
       - run: uv run dbt build
         working-directory: transform
+      # The dashboard, run headless on the tables just built: every section renders.
+      - run: uv run pytest tests/test_dashboard_page.py
 
   # The hourly job runs with the runner's own Python and no installation step.
   # So does the freshness check. This checks that all three still work that way,

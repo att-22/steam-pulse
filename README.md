@@ -21,7 +21,7 @@ tables and a dashboard.
 | Collection of the details of each game (name, genres, release date) | Running |
 | Load of the raw snapshots into the warehouse | Working locally (DuckDB); cloud warehouse planned |
 | Modelling with dbt | Hourly and daily tables, and a table of games with their names |
-| Dashboard | Planned |
+| Dashboard | Working locally; publishing planned |
 | Data quality and freshness alerts | Freshness check running; data tests in every build |
 
 ## How the collection works
@@ -144,6 +144,26 @@ raw.snapshots
   follows the player count, totals that can be true), and CI builds everything on a few
   real snapshots kept in `tests/sample/`.
 
+## The dashboard
+
+```
+marts (DuckDB)  ->  steam_pulse.dashboard (queries)  ->  dashboard/app.py (Streamlit)
+```
+
+- **What it answers.** What is being played right now; how each game moves hour by
+  hour; how many people are on Steam and when they play; which games enter and leave
+  the ranking.
+- **It says how fresh it is.** The newest snapshot, how old it is and how many of the
+  last 24 hours were collected sit at the top of the page, and turn into a warning past
+  the same limit as the freshness check.
+- **Gaps stay gaps.** A game that drops out of the ranking breaks its line instead of
+  falling to zero. A change is measured against the previous hour that was collected,
+  and the column says which one. An average by hour of the day resting on fewer than
+  three collected hours is drawn faded.
+- **Queries apart from the page.** Every figure comes from a function in
+  `steam_pulse.dashboard` with its own tests; the page only lays them out, and CI
+  renders it headless on the models built from the sample snapshots.
+
 ## Run it locally
 
 You only need [uv](https://docs.astral.sh/uv/).
@@ -164,6 +184,7 @@ load it into a local DuckDB file:
 git worktree add data origin/data     # the snapshots, in data/raw/
 uv run load                           # creates steam_pulse.duckdb
 cd transform && uv run dbt build      # builds the models and runs their tests
+cd .. && uv run streamlit run dashboard/app.py   # the dashboard, on http://localhost:8501
 ```
 
 The collection uses the Python standard library only, so the hourly job installs
