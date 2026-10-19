@@ -66,7 +66,8 @@ st.caption(
 )
 
 try:
-    db = connection()
+    # A cursor for this run only: the connection itself is shared by every visitor.
+    db = dashboard.session(connection())
 except OSError as error:
     st.error(f"The data could not be fetched ({error}). Try again in a few minutes.")
     st.stop()

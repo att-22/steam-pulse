@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime
 
 import duckdb
@@ -256,3 +257,24 @@ def test_a_period_is_whole_utc_days_both_included(moment, inside):
     ).fetchone()[0]
 
     assert found == (1 if inside else 0)
+
+
+def test_sessions_can_query_from_many_threads_at_once(warehouse):
+    # The page shares one connection between visitors, each in a thread of its own.
+    # On the connection itself, concurrent queries swapped results; one cursor per
+    # thread keeps them apart.
+    def visit(i):
+        db = dashboard.session(warehouse)
+        if i % 2:
+            return "appid" in dashboard.ranking_at(db, hour(18, 14)).columns
+        return "measure" in dashboard.platform_over_time(db).columns
+
+    with ThreadPoolExecutor(8) as pool:
+        assert all(pool.map(visit, range(200)))
+
+
+def test_a_session_is_in_utc_whatever_the_machine(warehouse):
+    db = dashboard.session(warehouse)
+
+    assert db.execute("select current_setting('TimeZone')").fetchone()[0] == "UTC"
+    assert dashboard.hours(db)[0] == hour(18, 14)

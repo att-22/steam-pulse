@@ -44,6 +44,20 @@ def connect(database: str | Path) -> duckdb.DuckDBPyConnection:
     return connection
 
 
+def session(connection: duckdb.DuckDBPyConnection) -> duckdb.DuckDBPyConnection:
+    """A cursor of ``connection`` for one thread, also in UTC.
+
+    The page keeps one connection for every visitor, and Streamlit runs each visit and
+    each click in a thread of its own. A DuckDB connection must not run queries from
+    several threads at once: two of them can swap results, and a page got the columns
+    of another query. A cursor is a connection of its own to the same database, cheap to
+    open. It does not inherit the time zone, so it is set again.
+    """
+    cursor = connection.cursor()
+    cursor.execute("set TimeZone = 'UTC'")
+    return cursor
+
+
 def status(connection: duckdb.DuckDBPyConnection, now: datetime) -> dict[str, Any] | None:
     """The newest hour with data, its totals, and how much of the last day was collected."""
     row = connection.execute(
