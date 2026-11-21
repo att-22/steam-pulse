@@ -1,0 +1,1 @@
+{"source": "app_details", "url": "https://store.steampowered.com/api/appdetails?appids=1329410&cc=us&l=english", "collected_at": "2026-11-21T00:57:05Z", "http_status": 200, "payload": {"1329410": {"success": false}}}
